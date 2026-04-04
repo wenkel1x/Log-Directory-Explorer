@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>M1 TE LOG SERVER MONITER</title>
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
+    <style>
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .search-card { border: none; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .table-card { border: none; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .status-pass { color: #28a745; font-weight: bold; }
+        .status-fail { color: #dc3545; font-weight: bold; }
+        .path-display { font-family: 'Courier New', Courier, monospace; font-size: 0.82rem; background: #f8f9fa !important; }
+        .btn-download { font-weight: 500; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-dark shadow-sm mb-4">
+    <div class="container-fluid">
+        <span class="navbar-brand fw-bold">📊 M1 Test Log View <small class="text-muted ms-2 fw-normal">| Server Online: {{ total_machines }}</small></span>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    <div class="card search-card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white py-3">
+            <h6 class="mb-0 fw-bold text-primary"><i class="bi bi-search me-2"></i>🔍 Advanced Search Filters</h6>
+        </div>
+        <div class="card-body bg-light-subtle">
+            <form id="searchForm" class="row g-3">
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Server Name</label>
+                    <input type="text" id="s_machine" class="form-control form-control-sm border-secondary-subtle" placeholder="e.g. log-71">
+                </div>
+                
+                <div class="col-md-2">
+                    <label class="form-label fw-bold text-dark">Serial Number (SN)</label>
+                    <input type="text" id="s_sn" class="form-control form-control-sm border-primary-subtle" placeholder="Fuzzy search supported">
+                </div>
+                
+                <div class="col-md-2">
+                    <label class="form-label fw-bold text-dark">Part Number (PN)</label>
+                    <input type="text" id="s_pn" class="form-control form-control-sm border-secondary-subtle" placeholder="Full PN">
+                </div>
+                
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Test Result</label>
+                    <select id="s_status" class="form-select form-select-sm border-secondary-subtle fw-bold">
+                        <option value="">-- ALL --</option>
+                        <option value="PASS" class="text-success">✅ PASS</option>
+                        <option value="FAIL" class="text-danger">❌ FAIL</option>
+                        <option value="ABORT" class="text-warning">⚠️ ABORT</option>
+                    </select>
+                </div>
+                
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Test Station</label>
+                    <input type="text" id="s_stage" class="form-control form-control-sm border-secondary-subtle" placeholder="e.g. BFT / FQA">
+                </div>
+                
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="button" id="btn_search" class="btn btn-primary btn-sm w-100 fw-bold">
+                        Apply Search
+                    </button>
+                    <button type="button" id="btn_reset" class="btn btn-outline-secondary btn-sm w-100">
+                        Reset
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+    <div class="card table-card">
+        <div class="card-body">
+            <table id="logTable" class="table table-hover w-100">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Time</th>
+                        <th>Server Name</th>
+                        <th>PN</th>
+                        <th>SN</th>
+                        <th>Station</th>
+                        <th>Result</th>
+                        <th>Action (Download/Path)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.log_time }}</td>
+                        <td>{{ log.server_name }}</td>
+                        <td>{{ log.pn }}</td>
+                        <td><strong>{{ log.sn }}</strong></td>
+                        <td>{{ log.stage }}</td>
+                        <td>
+                            <span class="{% if log.status == 'PASS' %}status-pass{% else %}status-fail{% endif %}">
+                                {{ log.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {% set machine_ip = ip_map.get(log.server_name, '0.0.0.0') %}
+                            {# 处理反斜杠拼接 #}
+                            {% set win_path = "\\\\" ~ machine_ip ~ "\\" ~ log.relative_path.replace('/', '\\') %}
+                            
+                            <div class="d-flex align-items-center gap-2">
+                                <a href="{{ url_for('download_log', server_name=log.server_name, rel_path=log.relative_path) }}" 
+                                   class="btn btn-sm btn-success btn-download">
+                                   📥 Download
+                                </a>
+                                
+                                <div class="input-group input-group-sm" style="width: 280px;">
+                                    <input type="text" class="form-control form-control-sm path-display" value="{{ win_path }}" id="p_{{ loop.index }}" readonly>
+                                    <button class="btn btn-outline-primary" type="button" onclick="copyText('p_{{ loop.index }}')">copy</button>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/jquery-3.7.0.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/jquery.dataTables.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dataTables.bootstrap5.min.js') }}"></script>
+
+<script>
+$(document).ready(function() {
+    // 1. 初始化 DataTables 并开启服务器模式
+    var table = $('#logTable').DataTable({
+        "dom": 'rtip',
+        "pageLength": 50,
+        "processing": true,      // 显示“处理中...”加载动画
+        "serverSide": true,      // 核心：开启服务器分页模式
+        "ajax": {
+            "url": "/api/logs_server_side", // 后端新的 API 地址
+            "type": "POST",
+            "data": function (d) {
+                // 将自定义搜索框的值传给后端
+                d.s_machine = $('#s_machine').val();
+                d.s_sn = $('#s_sn').val();
+                d.s_pn = $('#s_pn').val();
+                d.s_status = $('#s_status').val();
+                d.s_stage = $('#s_stage').val();
+            }
+        },
+        // 定义每一列对应的数据字段
+        "columns": [
+            { "data": "log_time" },
+            { "data": "server_name" },
+            { "data": "pn" },
+            { "data": "sn", "render": function(data){ return `<strong>${data}</strong>`; } },
+            { "data": "stage" },
+            { 
+                "data": "status", 
+                "render": function(data) {
+                    let cls = (data === 'PASS') ? 'status-pass' : 'status-fail';
+                    return `<span class="${cls}">${data}</span>`;
+                }
+            },
+            { 
+                "data": null, 
+                "orderable": false, // 操作列不需要排序
+                "render": function(data, type, row) {
+                    // 这里的 row 就是后端传回的一行 JSON 数据
+                    return `
+                        <div class="d-flex align-items-center gap-2">
+                            <a href="/download/${row.server_name}/${row.relative_path}" class="btn btn-sm btn-success">📥 Download</a>
+                            <div class="input-group input-group-sm" style="width: 250px;">
+                                <input type="text" class="form-control path-display" value="${row.win_path}" id="p_${row.id}" readonly>
+                                <button class="btn btn-outline-primary" type="button" onclick="copyText('p_${row.id}')">copy</button>
+                            </div>
+                        </div>`;
+                }
+            }
+        ],
+        "order": [[ 0, "desc" ]],
+        "language": { 
+            "info": "TOTAL _TOTAL_ Result", 
+            "paginate": { "next": "next ->", "previous": "<- previous" },
+            "processing": "Loading..."
+        }
+    });
+
+    // 2. 点击搜索按钮：触发 table.draw() 即可，它会自动调用 ajax
+    $('#btn_search').on('click', function() {
+        table.draw(); 
+    });
+
+    // 3. 支持回车搜索
+    $('#searchForm input').keypress(function (e) {
+        if (e.which == 13) {
+            $('#btn_search').click();
+            return false;
+        }
+    });
+
+    // 4. 重置
+    $('#btn_reset').on('click', function() {
+        $('#searchForm')[0].reset();
+        table.draw(); // 重置后重新加载
+    });
+});
+
+// 复制功能
+function copyText(id) {
+    var copyText = document.getElementById(id);
+    copyText.select();
+    document.execCommand("copy");
+    
+    var btn = window.event.target;
+    var originalText = btn.innerText;
+    btn.innerText = "Copy success";
+    btn.classList.replace('btn-outline-primary', 'btn-success');
+    setTimeout(() => { 
+        btn.innerText = originalText; 
+        btn.classList.replace('btn-success', 'btn-outline-primary');
+    }, 1000);
+}
+</script>
+</body>
+</html>
