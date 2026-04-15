@@ -1,0 +1,45 @@
+/* 全局基础样式 */
+body { 
+    background-color: #f4f7f6; 
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+}
+
+/* 卡片样式 */
+.search-card { 
+    border: none; 
+    border-radius: 10px; 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1); 
+    margin-bottom: 20px; 
+}
+.table-card { 
+    border: none; 
+    border-radius: 10px; 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05); 
+}
+
+/* 状态与文字 */
+.status-pass { color: #28a745; font-weight: bold; }
+.status-fail { color: #dc3545; font-weight: bold; }
+
+/* 表格列宽控制 */
+#logTable th, #logTable td { 
+    white-space: nowrap; 
+    vertical-align: middle; 
+}
+#logTable td.col-path { 
+    white-space: normal; 
+    word-break: break-all; 
+    min-width: 300px; 
+}
+
+/* 自定义功能组件 */
+.action-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+.year-wrapper { 
+    width: 130px; 
+    flex-shrink: 0; 
+}

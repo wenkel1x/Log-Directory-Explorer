@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>M1 TE LOG SERVER MONITOR</title>
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}">
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-dark shadow-sm mb-4">
+    <div class="container-fluid">
+        <span class="navbar-brand fw-bold">📊 M1 Test Log View <small class="text-muted ms-2 fw-normal">| Server Online: {{ total_machines }}</small></span>
+        <a href="{{ url_for('log_bp.tree_view') }}" class="btn btn-link text-decoration-none"> <i class="bi bi-arrow-left"></i> Go Directory Explorer</a>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    <div class="card search-card border-0 shadow-sm mb-4">
+        <div class="card-body bg-light-subtle">
+            <form id="searchForm" class="row g-3 align-items-end">
+                <div class="year-wrapper">
+                    <label class="form-label fw-bold text-primary small">Data Year</label>
+                    <select id="s_year" class="form-select form-select-sm fw-bold">
+                        <option value="all">All Years</option>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small fw-bold">Server</label>
+                    <input type="text" id="s_machine" class="form-control form-control-sm" placeholder="log-71">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-bold">SN</label>
+                    <input type="text" id="s_sn" class="form-control form-control-sm" placeholder="Serial Number">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">PN</label>
+                    <input type="text" id="s_pn" class="form-control form-control-sm" placeholder="Part Number">
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small fw-bold">Result</label>
+                    <select id="s_status" class="form-select form-select-sm">
+                        <option value="">-- ALL --</option>
+                        <option value="PASS" class="text-success">PASS</option>
+                        <option value="FAIL" class="text-danger">FAIL</option>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small fw-bold">Station</label>
+                    <input type="text" id="s_stage" class="form-control form-control-sm" placeholder="BFT">
+                </div>
+                <div class="col-md-2 d-flex gap-2">
+                    <button type="button" id="btn_search" class="btn btn-primary btn-sm w-100 fw-bold">Apply</button>
+                    <button type="button" id="btn_reset" class="btn btn-outline-secondary btn-sm w-50">Reset</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card table-card">
+        <div class="card-body p-2">
+            <table id="logTable" class="table table-hover w-100 border-top">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Time</th>
+                        <th>Server</th>
+                        <th>PN</th>
+                        <th>SN</th>
+                        <th>Station</th>
+                        <th>Result</th>
+                        <th style="width: 140px;">Actions</th> </tr>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="previewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-dark text-white py-2">
+                <h6 class="modal-title" id="previewTitle">Log Viewer</h6>
+                <div class="ms-auto">
+                    <!-- <button class="btn btn-sm btn-outline-light me-2" onclick="copyLogContent()">
+                        <i class="bi bi-clipboard"></i> Copy
+                    </button> -->
+                    <button class="btn btn-sm btn-info" onclick="saveLogFromMemory()">
+                        <i class="bi bi-download"></i> Save to PC
+                    </button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+            </div>
+            <div class="modal-body p-0 bg-dark">
+                <pre id="previewContent" class="m-0 p-3 text-light bg-dark" style="font-family: 'Courier New', monospace; font-size: 13px; white-space: pre-wrap; min-height: 400px;"></pre>
+            </div>
+            <div class="modal-footer py-1 bg-light">
+                <small class="text-muted">Cached in RAM (tmpfs)</small>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/jquery-3.7.0.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/jquery.dataTables.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dataTables.bootstrap5.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/search.js') }}"></script>
+
+</body> 
+</html>
