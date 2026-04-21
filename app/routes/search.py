@@ -32,49 +32,91 @@ def get_years():
     except Exception as e:
         return jsonify({"status": "success", "years": [get_target_year()]})
 
+@search_bp.route('/api/get_servers', methods=['GET'])
+def get_servers():
+    try:
+        sql = text("SELECT DISTINCT server_name FROM log_tree_data ORDER BY server_name ASC")
+        rows = db.session.execute(sql).fetchall()
+        servers = [row[0] for row in rows if row[0]]
+        return jsonify({"status": "success", "servers": servers})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
 @search_bp.route('/api/logs_server_side', methods=['POST'])
 def logs_server_side():
     draw = request.form.get('draw', type=int)
     start = request.form.get('start', type=int, default=0)
     length = request.form.get('length', type=int, default=50)
-    s_year, s_pn, s_sn, s_machine = request.form.get('s_year'), request.form.get('s_pn'), request.form.get('s_sn'), request.form.get('s_machine')
+
+    # 提取搜索参数
+    filters = {
+        "pn": request.form.get('s_pn'),
+        "sn": request.form.get('s_sn'),
+        "machine": request.form.get('s_machine'),
+        "status": request.form.get('s_status'),
+        "stage": request.form.get('s_stage')
+    }
+    s_year = request.form.get('s_year')
+
+    # 判断是否为无条件的首页加载
+    is_blank_search = not any(filters.values())
 
     try:
-        if s_year and s_year != 'all':
+        # 1. 确定目标表
+        target_years = [datetime.now().year]
+        if s_year and s_year.isdigit():
             target_years = [int(s_year)]
-        elif s_pn:
-            year_sql = text("SELECT DISTINCT last_active_year FROM log_tree_data WHERE pn = :pn")
-            year_rows = db.session.execute(year_sql, {"pn": s_pn}).fetchall()
-            target_years = [row[0] for row in year_rows if row[0] > 0]
-            if not target_years: target_years = [datetime.now().year]
-        else:
-            target_years = [datetime.now().year]
 
         subqueries = []
-        params = {"pn": s_pn, "sn": f"{s_sn}%" if s_sn else None, "machine": s_machine}
+        sql_params = {**filters, "start": start, "length": length}
+        if filters["sn"]: sql_params["sn"] = f"{filters['sn']}%"
+
         for y in target_years:
             table_name = f"log_index_{y}"
             check = db.session.execute(text(f"SHOW TABLES LIKE '{table_name}'")).fetchone()
             if not check: continue
+
             where = ["1=1"]
-            if s_pn: where.append("pn = :pn")
-            if s_sn: where.append("sn LIKE :sn")
-            if s_machine: where.append("server_name = :machine")
-            subqueries.append(f"SELECT * FROM `{table_name}` WHERE {' AND '.join(where)}")
+            if filters["pn"]:      where.append("pn = :pn")
+            if filters["sn"]:      where.append("sn LIKE :sn")
+            if filters["machine"]: where.append("server_name = :machine")
+            if filters["status"]:  where.append("status = :status")
+            if filters["stage"]:   where.append("stage = :stage")
+
+            # --- 非索引优化：如果是空搜索，强制给子查询加 LIMIT，防止全扫描 ---
+            sub_limit = ""
+            if is_blank_search:
+                sub_limit = "LIMIT 5000"
+
+            subqueries.append(f"SELECT log_time, server_name, sn, pn, status, stage, relative_path FROM `{table_name}` WHERE {' AND '.join(where)} ORDER BY log_time DESC {sub_limit}")
 
         if not subqueries:
             return jsonify({"draw": draw, "recordsTotal": 0, "recordsFiltered": 0, "data": []})
 
         union_sql = " UNION ALL ".join(subqueries)
-        final_sql = text(f"SELECT log_time, server_name, sn, pn, status, stage, relative_path FROM ({union_sql}) as combined ORDER BY log_time DESC LIMIT :start, :length")
-        params.update({"start": start, "length": length})
-        logs = db.session.execute(final_sql, params).fetchall()
 
-        count_sql = text(f"SELECT COUNT(*) FROM ({union_sql}) as total")
-        records_filtered = db.session.execute(count_sql, params).scalar()
+        # 2. 优化计数：如果是初始化，直接返回一个假的总数
+        if is_blank_search:
+            records_filtered = 5000
+        else:
+            count_sql = text(f"SELECT COUNT(*) FROM ({union_sql}) as total")
+            records_filtered = db.session.execute(count_sql, sql_params).scalar()
 
-        data = [{"log_time": l[0].strftime('%Y-%m-%d %H:%M:%S') if l[0] else "", "server": l[1], "sn": l[2], "pn": l[3], "status": l[4], "stage": l[5], "path": l[6]} for l in logs]
-        return jsonify({"draw": draw, "recordsTotal": records_filtered, "recordsFiltered": records_filtered, "data": data})
+        # 3. 分页查询
+        final_sql = text(f"SELECT * FROM ({union_sql}) as combined ORDER BY log_time DESC LIMIT :start, :length")
+        logs = db.session.execute(final_sql, sql_params).fetchall()
+
+        data = [{
+            "log_time": l[0].strftime('%Y-%m-%d %H:%M:%S') if l[0] else "",
+            "server": l[1], "sn": l[2], "pn": l[3], "status": l[4], "stage": l[5], "path": l[6]
+        } for l in logs]
+
+        return jsonify({
+            "draw": draw,
+            "recordsTotal": records_filtered,
+            "recordsFiltered": records_filtered,
+            "data": data
+        })
     except Exception as e:
         return jsonify({"draw": draw, "error": str(e), "data": []})
 

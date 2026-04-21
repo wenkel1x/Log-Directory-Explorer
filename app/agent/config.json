@@ -11,7 +11,7 @@
         "SIMPLE_FIXTURE"
     ],
     "pn_parent_folders": ["SIMPLE_FIXTURE"],
-    "valid_stages": ["FT", "BFT", "FQA", "SIMPLE_FIXTURE"],
+    "valid_stages": ["BFT", "FQA", "SIMPLE_FIXTURE"],
     "valid_status": ["PASS", "FAIL", "ABORT"],
     "block_list": ["backup", "tmp", "routing", "temp", "bak", "process","sel"]
 }

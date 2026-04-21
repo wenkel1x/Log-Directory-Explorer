@@ -27,16 +27,32 @@ def report_ip():
     if not server_name:
         return jsonify({"status": "error", "msg": "Missing server_name"}), 400
 
-    # 如果是本地上报且带了 IP，优先使用上报的 IP
+    # 确定最终使用的 IP
     final_ip = manual_ip if (detected_ip == '127.0.0.1' and manual_ip) else detected_ip
 
     ip_map = load_ip_map()
+    dirty = False
+
+    # 检查 IP 是否已被其他主机名占用,查找是否有其他 hostname 记录了当前的这个 IP
+    existing_hosts_with_this_ip = [name for name, ip in ip_map.items() if ip == final_ip]
+
+    for old_name in existing_hosts_with_this_ip:
+        if old_name != server_name:
+            # 如果 IP 相同但名字不同，删掉旧的名字记录
+            del ip_map[old_name]
+            dirty = True
+
+    # --- 检查当前 hostname 的 IP 是否需要更新 ---
     if ip_map.get(server_name) != final_ip:
         ip_map[server_name] = final_ip
+        dirty = True
+
+    # 如果有任何变动，执行写入
+    if dirty:
         with open(IP_MAP_PATH, 'w', encoding='utf-8') as f:
             json.dump(ip_map, f, indent=4, ensure_ascii=False)
 
-    return jsonify({"status": "success", "ip": final_ip})
+    return jsonify({"status": "success", "ip": final_ip, "updated": dirty})
 
 @upload_bp.route('/svc/upload_batch', methods=['POST'])
 def upload_batch():
@@ -221,7 +237,7 @@ def get_server_stats():
         FROM `{table_name}`
         WHERE log_time >= :start
         GROUP BY server_name, stage
-        ORDER BY last_update DESC
+        ORDER BY server_name ASC, last_update DESC
     """)
     try:
         # execute 返回的结果对象
