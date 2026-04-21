@@ -1,4 +1,16 @@
 $(document).ready(function() {
+    // 1. 获取 URL 中的参数 (例如 ?s_sn=123&s_pn=ABC)
+    const urlParams = new URLSearchParams(window.location.search);
+    const sn = urlParams.get('s_sn'); // 可能为空（PN 搜索时）
+    const pn = urlParams.get('s_pn'); // 始终有值
+
+    if (sn || pn) {
+        if (sn) $('#s_sn').val(sn);
+        if (pn) $('#s_pn').val(pn);
+        // 自动执行搜索
+        setTimeout(() => { $('#btn_search').click(); }, 500);
+    }
+
     // 初始化年份下拉框
     $.get('/api/get_years', function(data) {
         if (data.status === 'success') {
@@ -16,9 +28,9 @@ $(document).ready(function() {
             type: 'POST',
             data: function(d) {
                 d.s_year = $('#s_year').val();
-                d.s_machine = $('#s_machine').val();
-                d.s_sn = $('#s_sn').val();
-                d.s_pn = $('#s_pn').val();
+                d.s_machine = $.trim($('#s_machine').val());
+                d.s_sn = $.trim($('#s_sn').val());
+                d.s_pn = $.trim($('#s_pn').val());
                 d.s_status = $('#s_status').val();
                 d.s_stage = $('#s_stage').val();
             }

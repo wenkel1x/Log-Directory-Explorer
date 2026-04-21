@@ -1,0 +1,17 @@
+{
+    "patterns": [
+        "PN/BFT/PASS",
+        "PN/BFT/FAIL",
+        "PN/FT/PASS",
+        "PN/FT/FAIL",
+        "PN/FQA/PASS",
+        "PN/FQA/FAIL",
+        "PN/PASS",
+        "PN/FAIL",
+        "SIMPLE_FIXTURE"
+    ],
+    "pn_parent_folders": ["SIMPLE_FIXTURE"],
+    "valid_stages": ["FT", "BFT", "FQA", "SIMPLE_FIXTURE"],
+    "valid_status": ["PASS", "FAIL", "ABORT"],
+    "block_list": ["backup", "tmp", "routing", "temp", "bak", "process","sel"]
+}

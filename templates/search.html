@@ -12,8 +12,8 @@
 
 <nav class="navbar navbar-dark bg-dark shadow-sm mb-4">
     <div class="container-fluid">
-        <span class="navbar-brand fw-bold">📊 M1 Test Log View <small class="text-muted ms-2 fw-normal">| Server Online: {{ total_machines }}</small></span>
-        <a href="{{ url_for('log_bp.tree_view') }}" class="btn btn-link text-decoration-none"> <i class="bi bi-arrow-left"></i> Go Directory Explorer</a>
+        <span class="navbar-brand fw-bold" style="cursor: pointer;" onclick="location.href='{{ url_for('main_bp.index') }}';">📊 M1 Test Log View</span>
+        <a href="{{ url_for('tree_bp.tree_view') }}" class="btn btn-link text-decoration-none"> <i class="bi bi-arrow-left"></i> Go Directory Explorer</a>
     </div>
 </nav>
 
@@ -70,7 +70,7 @@
                         <th>SN</th>
                         <th>Station</th>
                         <th>Result</th>
-                        <th style="width: 140px;">Actions</th> </tr>
+                        <th style="width: 140px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody></tbody>

@@ -20,8 +20,8 @@
 
 <nav class="navbar navbar-dark bg-dark shadow-sm mb-4">
     <div class="container-fluid">
-        <span class="navbar-brand fw-bold">📂 Log Directory Explorer</span>
-        <a href="{{ url_for('log_bp.index') }}" class="btn btn-link text-decoration-none text-info"> <i class="bi bi-arrow-left"></i> Go Advanced Search</a>
+        <span class="navbar-brand fw-bold" style="cursor: pointer;" onclick="location.href='{{ url_for('main_bp.index') }}';">📂 Log Directory Explorer</span>
+        <a href="{{ url_for('search_bp.index') }}" class="btn btn-link text-decoration-none text-info"> <i class="bi bi-arrow-left"></i> Go Advanced Search</a>
     </div>
 </nav>
 

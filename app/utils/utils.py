@@ -5,9 +5,9 @@ from datetime import datetime
 from flask import request
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-IP_MAP_PATH = os.path.join(APP_DIR, 'ip_map.json')
+IP_MAP_PATH = os.path.join(APP_DIR,'ip_map.json')
 # 缓存放在项目根目录
-CACHE_DIR = os.path.join(os.path.dirname(APP_DIR), 'static','cache')
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(APP_DIR)), 'static','cache')
 MAX_CACHE_GB = 1.5
 MAX_CACHE_BYTES = MAX_CACHE_GB * 1024 * 1024 * 1024
 

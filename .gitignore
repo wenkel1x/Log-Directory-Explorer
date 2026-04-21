@@ -1,0 +1,3 @@
+server_api/static/cache/
+server_api/__pycache__
+server_api/app/__pycache__

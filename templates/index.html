@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Log Portal</title>
+    
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}" rel="stylesheet" >
+    
+    <style>
+        /* 1. 基础布局调整：允许自然滚动，不再锁死 100vh */
+        html, body {
+            height: 100%;
+            margin: 0;
+            background-color: #f8fafc;
+            color: #1e293b;
+            font-family: 'Inter', -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-bar {
+            background: #1e293b;
+            color: #ffffff;
+            padding: 10px 0;
+            border-bottom: 3px solid #3b82f6;
+            flex-shrink: 0;
+        }
+
+        /* 2. 主容器：使用 flex-grow 占据剩余空间，但不限制高度 */
+        .main-container {
+            flex: 1 0 auto; 
+            width: 100%;
+            max-width: 1100px; /* 稍微缩小容器宽度，让布局更紧凑 */
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        /* 3. 卡片缩小优化 */
+        .project-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px; /* 缩小内边距 */
+            height: 100%;
+            transition: all 0.3s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .project-card:hover {
+            transform: translateY(-3px);
+            border-color: #3b82f6;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .icon-box {
+            width: 48px; /* 缩小图标框 */
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            font-size: 1.25rem;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .card-title {
+            font-size: 1.1rem; /* 缩小标题 */
+            font-weight: 700;
+            margin-bottom: 0;
+        }
+
+        /* 4. 监控区域自适应 */
+        .activity-section {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            margin-top: 30px;
+            overflow: hidden;
+        }
+
+        .table thead th {
+            background-color: #f8fafc;
+            font-size: 0.75rem;
+            color: #64748b;
+            padding: 12px 15px;
+        }
+
+        /* 5. 页脚：自然排列在文档流最后 */
+        .footer {
+            flex-shrink: 0; /* 防止页脚被压缩 */
+            background-color: #ffffff;
+            border-top: 1px solid #e2e8f0;
+            padding: 20px 0;
+            margin-top: 40px;
+        }
+
+        /* 按钮尺寸微调 */
+        .btn-sm-custom {
+            padding: 6px 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-radius: 8px;
+        }
+</style>
+</head>
+<body>
+
+<nav class="header-bar shadow-sm">
+    <div class="container d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <i class="bi bi-intersect me-2 text-primary fs-5"></i>
+            <span class="fw-bold">Dashboard</span>
+        </div>
+    </div>
+</nav>
+
+<div class="main-container">
+    <div class="projects-grid">
+        <div class="row g-3"> {% for p in projects %}
+            <div class="col-md-6 col-lg-4"> <div class="project-card">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="icon-box bg-{{ p.color }} bg-opacity-10 text-{{ p.color }}">
+                            <i class="bi {{ p.icon }}"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="card-title">{{ p.name }}</h5>
+                                <span class="small text-{{ 'success' if p.status == 'Active' else 'muted' }} fw-bold">
+                                    {{ p.status }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <p class="text-muted small mb-3" style="min-height: 40px;">{{ p.desc }}</p>
+                    
+                    <div class="row g-2">
+                        {% if p.status == 'Active' %}
+                        <div class="col-6">
+                            <a href="{{ url_for(p.tree_url) if p.tree_url else '#' }}" class="btn btn-primary btn-sm-custom w-100">Log Explorer</a>
+                        </div>
+                        <div class="col-6">
+                            <a href="{{ url_for(p.search_url) if p.search_url else '#' }}" class="btn btn-outline-primary btn-sm-custom w-100">Advance Search</a>
+                        </div>
+                        {% else %}
+                        <div class="col-12">
+                            <button class="btn btn-light btn-sm-custom w-100 text-muted" disabled>Under Development</button>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="activity-section">
+        <div class="p-3 border-bottom d-flex justify-content-between align-items-center bg-light bg-opacity-50">
+            <span class="fw-bold small text-dark"><i class="bi bi-activity me-1 text-primary"></i>Recent Ingestion</span>
+            <span class="text-muted" style="font-size: 0.7rem;">Live refresh enabled</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                        <th class="ps-4">Node</th>
+                        <th class="text-center">Station</th>
+                        <th class="text-center">Logs (Yesterday)</th>
+                        <th class="text-center">Logs (Today)</th>
+                        <th class="text-center">Status</th>
+                        <th class="text-end pe-4">Last Update</th>
+                    </tr>
+                </thead>
+                <tbody style="font-size: 0.8rem;">
+                    {% for s in stats %}
+                    <tr>
+                        <td class="ps-4">
+                            <div class="fw-bold text-dark">{{ s.server }}</div>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge {% if s.stage == 'BFT' %}bg-info-subtle text-info{% else %}bg-warning-subtle text-warning{% endif %} border">
+                                {{ s.stage }}
+                            </span>
+                        </td>
+                        <td class="text-center text-muted">
+                            {{ "{:,}".format(s.yesterday_count) }}
+                        </td>
+                        <td class="text-center text-primary fw-bold">
+                            {{ "{:,}".format(s.today_count) }}
+                        </td>
+                        <td class="text-center">
+                            <span class="text-success fw-bold" style="font-size: 0.7rem;">
+                                <span class="spinner-grow spinner-grow-sm me-1" style="width: 6px; height: 6px;"></span>
+                                LIVE
+                            </span>
+                        </td>
+                        <td class="text-end pe-4 text-muted font-monospace">
+                            {{ s.last_time }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<footer class="footer">
+    <div class="container text-center small text-secondary">
+        &copy; 2026 Log Analysis Portal System Version 0.1 |
+        Technical Support: <a href="mailto:Wenkex.Li@quantacn.com" class="text-decoration-none fw-bold">Wenkex.Li@quantacn.com</a>
+    </div>
+</footer>
+
+</body>
+</html>
