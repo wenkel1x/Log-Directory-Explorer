@@ -220,55 +220,79 @@ def cleanup_stale_data():
 
 def get_server_stats():
     target_year = datetime.now().year
-    # 动态表名：确保表名在数据库中确实存在
     table_name = f"log_index_{target_year}"
     now = datetime.now()
     today = now.date()
     yesterday = today - timedelta(days=1)
-    # 转换为字符串格式，确保与数据库格式匹配
     start_time = yesterday.strftime('%Y-%m-%d 00:00:00')
+
+    # SQL 仅获取原始聚合数据
     sql = text(f"""
         SELECT
             server_name,
             stage,
-            MAX(log_time) as last_update,
-            SUM(CASE WHEN DATE(log_time) = :today THEN 1 ELSE 0 END) as today_count,
-            SUM(CASE WHEN DATE(log_time) = :yesterday THEN 1 ELSE 0 END) as yesterday_count
+            SUM(CASE WHEN DATE(log_time) = :today THEN 1 ELSE 0 END) as t_count,
+            SUM(CASE WHEN DATE(log_time) = :yesterday THEN 1 ELSE 0 END) as y_count,
+            MAX(log_time) as last_up
         FROM `{table_name}`
         WHERE log_time >= :start
         GROUP BY server_name, stage
-        ORDER BY server_name ASC, last_update DESC
     """)
+
     try:
-        # execute 返回的结果对象
-        result_proxy = db.session.execute(sql, {
-            "today": today,
-            "yesterday": yesterday,
-            "start": start_time
-        })
-        stats = []
-        # 使用 .mappings() 这样可以用 row['server_name'] 访问，更稳健
+        result_proxy = db.session.execute(sql, {"today": today, "yesterday": yesterday, "start": start_time})
+
+        # 在 Python 中进行二次聚合
+        server_map = {}
         for row in result_proxy.mappings():
-            last_dt = row['last_update']
-            # 格式化时间显示逻辑
-            if isinstance(last_dt, datetime):
-                # 如果是今天，只显示时间；如果跨天，显示月-日 时间
-                if last_dt.date() == today:
-                    display_time = last_dt.strftime('%H:%M:%S')
-                else:
-                    display_time = last_dt.strftime('%m-%d %H:%M')
-            else:
-                display_time = str(last_dt) if last_dt else "N/A"
+            sn = str(row['server_name']).upper()
+            stg = row['stage'] or 'UNKNOWN'
+
+            if sn not in server_map:
+                server_map[sn] = {
+                    'server': sn,
+                    'stages': [],
+                    'today_count': 0,
+                    'yesterday_count': 0,
+                    'last_dt': None,
+                    'details': {'today': {}, 'yesterday': {}}
+                }
+
+            # 累加总数
+            server_map[sn]['today_count'] += int(row['t_count'] or 0)
+            server_map[sn]['yesterday_count'] += int(row['y_count'] or 0)
+
+            # 记录各站阶明细
+            if row['t_count'] > 0:
+                server_map[sn]['details']['today'][stg] = int(row['t_count'])
+            if row['y_count'] > 0:
+                server_map[sn]['details']['yesterday'][stg] = int(row['y_count'])
+            # 记录站阶列表用于显示 Badge
+            if stg not in server_map[sn]['stages']:
+                server_map[sn]['stages'].append(stg)
+            # 比较最后更新时间
+            curr_last = row['last_up']
+            if curr_last and (not server_map[sn]['last_dt'] or curr_last > server_map[sn]['last_dt']):
+                server_map[sn]['last_dt'] = curr_last
+
+        # 格式化输出列表
+        stats = []
+        for sn in sorted(server_map.keys()):
+            item = server_map[sn]
+            # 时间格式化
+            ldt = item['last_dt']
+            display_time = ldt.strftime('%H:%M:%S') if ldt and ldt.date() == today else (ldt.strftime('%m-%d %H:%M') if ldt else "N/A")
+
             stats.append({
-                'server': str(row['server_name']).upper(),
-                'stage': row['stage'] or 'N/A',
+                'server': sn,
+                'stage': "|".join(item['stages']),
                 'last_time': display_time,
-                'today_count': int(row['today_count'] or 0),
-                'yesterday_count': int(row['yesterday_count'] or 0),
+                'today_count': item['today_count'],
+                'yesterday_count': item['yesterday_count'],
+                'details': item['details'],
                 'status': 'Active'
             })
         return stats
     except Exception as e:
-        # 这里建议使用 logging 模块，生产环境更易追溯
-        print(f"Stats Error on table {table_name}: {e}")
+        print(f"Error: {e}")
         return []

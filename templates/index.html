@@ -162,54 +162,75 @@
         </div>
     </div>
 
-    <div class="activity-section">
-        <div class="p-3 border-bottom d-flex justify-content-between align-items-center bg-light bg-opacity-50">
-            <span class="fw-bold small text-dark"><i class="bi bi-activity me-1 text-primary"></i>Recent Ingestion</span>
-            <span class="text-muted" style="font-size: 0.7rem;">Live refresh enabled</span>
-        </div>
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
-                <thead class="table-light">
-                    <tr style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
-                        <th class="ps-4">Node</th>
-                        <th class="text-center">Station</th>
-                        <th class="text-center">Logs (Yesterday)</th>
-                        <th class="text-center">Logs (Today)</th>
-                        <th class="text-center">Status</th>
-                        <th class="text-end pe-4">Last Update</th>
-                    </tr>
-                </thead>
-                <tbody style="font-size: 0.8rem;">
-                    {% for s in stats %}
-                    <tr>
-                        <td class="ps-4">
-                            <div class="fw-bold text-dark">{{ s.server }}</div>
-                        </td>
-                        <td class="text-center">
-                            <span class="badge {% if s.stage == 'BFT' %}bg-info-subtle text-info{% else %}bg-warning-subtle text-warning{% endif %} border">
-                                {{ s.stage }}
+ <div class="activity-section">
+    <div class="p-3 border-bottom d-flex justify-content-between align-items-center bg-light bg-opacity-50">
+        <span class="fw-bold small text-dark"><i class="bi bi-activity me-1 text-primary"></i>Recent Ingestion</span>
+        <span class="text-muted" style="font-size: 0.7rem;">Live refresh enabled</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                    <th class="ps-4">Node</th>
+                    <th class="text-center">Station</th>
+                    <th class="text-center">Logs (Yesterday)</th>
+                    <th class="text-center">Logs (Today)</th>
+                    <th class="text-center">Status</th>
+                    <th class="text-end pe-4">Last Update</th>
+                </tr>
+            </thead>
+            <tbody style="font-size: 0.8rem;">
+                {% for s in stats %}
+                <tr>
+                    <td class="ps-4">
+                        <div class="fw-bold text-dark">{{ s.server }}</div>
+                    </td>
+
+                    <td class="text-center">
+                        {% set stage_list = s.stage.split('|') %}
+                        {% for st in stage_list %}
+                            {% set st = st.strip() %}
+                            <span class="badge border me-1
+                                {% if st == 'BFT' %}bg-info-subtle text-info
+                                {% elif st == 'FQA' %}bg-warning-subtle text-warning
+                                {% else %}bg-secondary-subtle text-secondary{% endif %}"
+                                style="font-size: 0.7rem;">
+                                {{ st }}
                             </span>
-                        </td>
-                        <td class="text-center text-muted">
-                            {{ "{:,}".format(s.yesterday_count) }}
-                        </td>
-                        <td class="text-center text-primary fw-bold">
-                            {{ "{:,}".format(s.today_count) }}
-                        </td>
-                        <td class="text-center">
-                            <span class="text-success fw-bold" style="font-size: 0.7rem;">
-                                <span class="spinner-grow spinner-grow-sm me-1" style="width: 6px; height: 6px;"></span>
-                                LIVE
-                            </span>
-                        </td>
-                        <td class="text-end pe-4 text-muted font-monospace">
-                            {{ s.last_time }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+                        {% endfor %}
+                    </td>
+                    <td class="text-center text-muted">
+                        <div>{{ "{:,}".format(s.yesterday_count) }}</div>
+                        <div style="font-size: 0.65rem; opacity: 0.8;">
+                            {% for stg, count in s.details.yesterday.items() %}
+                                {{ stg }}:{{ count }}{% if not loop.last %} | {% endif %}
+                            {% endfor %}
+                        </div>
+                    </td>
+
+                    <td class="text-center text-primary fw-bold">
+                        <div>{{ "{:,}".format(s.today_count) }}</div>
+                        <div class="text-muted fw-normal" style="font-size: 0.65rem; margin-top: -2px;">
+                            {% for stg, count in s.details.today.items() %}
+                                {{ stg }}:{{ count }}{% if not loop.last %} | {% endif %}
+                            {% endfor %}
+                        </div>
+                    </td>
+
+                    <td class="text-center">
+                        <span class="text-success fw-bold" style="font-size: 0.7rem;">
+                            <span class="spinner-grow spinner-grow-sm me-1" style="width: 6px; height: 6px;"></span>
+                            LIVE
+                        </span>
+                    </td>
+
+                    <td class="text-end pe-4 text-muted font-monospace">
+                        {{ s.last_time }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 
