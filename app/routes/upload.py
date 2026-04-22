@@ -237,6 +237,7 @@ def get_server_stats():
         FROM `{table_name}`
         WHERE log_time >= :start
         GROUP BY server_name, stage
+        ORDER BY last_up DESC
     """)
 
     try:
