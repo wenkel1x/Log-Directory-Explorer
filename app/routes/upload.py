@@ -6,14 +6,14 @@ from sqlalchemy import text
 from app import db
 from app.utils.utils import load_ip_map, IP_MAP_PATH
 import time
-
+import redis
 
 upload_bp = Blueprint('upload_bp', __name__)
 
 # 使用锁确保缓存更新和表创建的线程安全
 table_cache_lock = threading.Lock()
 EXISTING_TABLE_CACHE = set()
-#YEAR_RE = re.compile(r'(?:[_/-])(20\d{2})(?:[_/-]|$)')
+r_client = redis.Redis(host='127.0.0.1', port=6379, db=0)
 
 @upload_bp.route('/svc/report_ip', methods=['POST'])
 def report_ip():
@@ -54,6 +54,20 @@ def report_ip():
 
     return jsonify({"status": "success", "ip": final_ip, "updated": dirty})
 
+
+@upload_bp.route('/svc/upload_batch', methods=['POST'])
+def upload_batch():
+    data = request.json
+    if not data:
+        return jsonify({"status": "error", "msg": "No data received"}), 400
+
+    try:
+        # 核心：只负责塞进 Redis
+        r_client.lpush("log_upload_queue", json.dumps(data))
+        return jsonify({"status": "success", "mode": "async"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "msg": str(e)}), 500
+'''
 @upload_bp.route('/svc/upload_batch', methods=['POST'])
 def upload_batch():
     global EXISTING_TABLE_CACHE
@@ -81,25 +95,6 @@ def upload_batch():
             log_time_str = item.get('log_time', '')
             if len(log_time_str) < 4: continue
             reported_year_str = log_time_str[:4]
-            '''
-            try:
-                reported_year_int = int(reported_year_str)
-            except ValueError:
-                print(f"--- [Wait] Invalid year format: {reported_year_str} from {log_time_str}",flush=True)
-                continue
-            # 如果年份不在 2010 ~ current_year 之间，则启动正则校准
-            if not (2010 <= reported_year_int <= current_year):
-                file_context = f"{item.get('file_name', '')}_{item.get('relative_path', '')}"
-                match = YEAR_RE.search(file_context)
-                if match:
-                    extracted_year = match.group(1)
-                    # 只有提取出的年份在合法范围内才替换
-                    if 2010 <= int(extracted_year) <= current_year:
-                        item['log_time'] = extracted_year + log_time_str[4:]
-                        reported_year_str = extracted_year
-                else:
-                    print(f"--- [Miss] Regex failed to find year in: {file_context}",flush=True)
-            '''
             table_name = f"log_index_{reported_year_str}"
             # 线程安全地检查并创建表
             if table_name not in EXISTING_TABLE_CACHE:
@@ -147,6 +142,7 @@ def upload_batch():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "msg": str(e)}), 500
+'''
 
 @upload_bp.route('/svc/cleanup', methods=['POST'])
 def cleanup_stale_data():
@@ -159,10 +155,31 @@ def cleanup_stale_data():
     if not all([s_name, sh_name, s_id]) or s_id == 0:
         return jsonify({"status": "error", "msg": "Invalid identification params"}), 400
 
+    max_retries = 30
+    retry_count = 0
+    while True:
+        try:
+            queue_len = r_client.llen("log_upload_queue")
+            if queue_len == 0:
+                print(f"--- [CLEANUP] Redis queue is empty. Proceeding to delete... ---")
+                break
+            if retry_count >= max_retries:
+                return jsonify({
+                    "status": "error",
+                    "msg": f"Cleanup timeout: {queue_len} batches still in Redis. Check worker.py"
+                }), 500
+            retry_count += 1
+            if retry_count % 3 == 0:
+                print(f"--- [CLEANUP WAIT] {queue_len} batches pending in Redis. Waiting... ({retry_count*10}s)")
+
+            time.sleep(10)
+        except Exception as re:
+            print(f"--- [CLEANUP ERROR] Redis check failed: {str(re)}")
+            break
+
     print(f"\n{'='*60}")
     print(f"[CLEANUP START] Server: {s_name} | Share: {sh_name} | Target ScanID: {s_id}")
     print(f"{'='*60}")
-
     try:
         # 查找所有年份分表
         result = db.session.execute(text("SHOW TABLES LIKE 'log_index_%'")).fetchall()
@@ -206,7 +223,7 @@ def cleanup_stale_data():
                 time.sleep(0.05)
 
             deleted_total += table_deleted_count
-            print(f"    Successfully deleted {table_deleted_count} rows from {table_name}.")
+            print(f"   Successfully deleted {table_deleted_count} rows from {table_name}.")
 
         print(f"\n{'='*60}")
         print(f"[CLEANUP FINISHED] Total items removed from DB: {deleted_total}")

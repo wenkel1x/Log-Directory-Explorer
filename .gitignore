@@ -2,3 +2,4 @@ static/cache/
 __pycache__
 app/__pycache__
 app/routes/__pycache__
+app/utils/ip_map.json
