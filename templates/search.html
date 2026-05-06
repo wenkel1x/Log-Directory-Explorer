@@ -12,7 +12,7 @@
 
 <nav class="navbar navbar-dark bg-dark shadow-sm mb-4">
     <div class="container-fluid">
-        <span class="navbar-brand fw-bold" style="cursor: pointer;" onclick="location.href='{{ url_for('main_bp.index') }}';">📊 M1 Test Log View</span>
+        <span class="navbar-brand fw-bold" style="cursor: pointer;" onclick="location.href='{{ url_for('main_bp.index') }}';"> 🔎 Log Advance Search</span>
         <a href="{{ url_for('tree_bp.tree_view') }}" class="btn btn-link text-decoration-none"> <i class="bi bi-arrow-left"></i> Go Directory Explorer</a>
     </div>
 </nav>
@@ -27,15 +27,17 @@
                         <option value="all">All Years</option>
                     </select>
                 </div>
-                <div class="col-md-1">
+                <div class="col-md-2">
                     <label class="form-label small fw-bold">Server</label>
-                    <input type="text" id="s_machine" class="form-control form-control-sm" placeholder="log-71">
+                    <select id="s_machine" class="form-select form-select-sm">
+                        <option value="">All</option>
+                    </select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small fw-bold">SN</label>
                     <input type="text" id="s_sn" class="form-control form-control-sm" placeholder="Serial Number">
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label small fw-bold">PN</label>
                     <input type="text" id="s_pn" class="form-control form-control-sm" placeholder="Part Number">
                 </div>

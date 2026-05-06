@@ -19,6 +19,16 @@ $(document).ready(function() {
         }
     });
 
+    //初始化 Server 下拉框
+    $.get('/api/get_servers', function(data) {
+        if (data.status === 'success') {
+            let options = data.servers.map(s => `<option value="${s}">${s}</option>`).join('');
+            $('#s_machine').append(options);
+        } else {
+            console.error("Failed to load servers:", data.message);
+        }
+    });
+
     // 初始化 DataTable
     const table = $('#logTable').DataTable({
         processing: true,
