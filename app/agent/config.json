@@ -8,10 +8,12 @@
         "PN/FQA/FAIL",
         "PN/PASS",
         "PN/FAIL",
+        "PN/LOG_FQA",
+        "PN/LOG_FAT",
         "SIMPLE_FIXTURE"
     ],
     "pn_parent_folders": ["SIMPLE_FIXTURE"],
-    "valid_stages": ["BFT", "FQA", "SIMPLE_FIXTURE"],
+    "valid_stages": ["BFT", "FQA", "SIMPLE_FIXTURE","FAT"],
     "valid_status": ["PASS", "FAIL", "ABORT"],
     "block_list": ["backup", "tmp", "routing", "temp", "bak", "process","sel"]
 }

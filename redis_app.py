@@ -30,10 +30,11 @@ def handle_cleanup_task(task_data):
     s_name = task_data.get('server_name')
     sh_name = task_data.get('share_name')
     s_id = task_data.get('scan_id')
+    print(f"DEBUG: Starting cleanup for Server: [{s_name}], Share: [{sh_name}], ScanID: {s_id}")
     try:
         result = db.session.execute(text("SHOW TABLES LIKE 'log_index_%'")).fetchall()
         all_tables = [row[0] for row in result if row[0] != 'log_index_template']
-
+        print(f"DEBUG: Found tables to scan: {all_tables}")
         total_deleted = 0
         for table_name in all_tables:
             while True:
