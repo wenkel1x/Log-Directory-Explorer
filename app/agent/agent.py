@@ -27,7 +27,7 @@ class LogAgent:
         current_script_dir = Path(__file__).parent
         self.state_file = current_script_dir / f".state_{self.server_name}.json"
 
-        self.re_pn_standard = re.compile(r'^[23][A-Z0-9]{10,}')
+        self.re_pn_standard = re.compile(r'^[123][A-Z0-9]{10}$')
         self.load_config()
 
         self.batch_size = 1000
@@ -50,6 +50,7 @@ class LogAgent:
             with open(config_path, 'r', encoding='utf-8') as f:
                 conf = json.load(f)
                 raw_patterns = [p.upper().split('/') for p in conf.get("patterns", [])]
+                self.original_patterns = conf.get("patterns", [])
                 self.patterns = [set(p) for p in raw_patterns]
                 self.first_level_allowed = {p[0] for p in raw_patterns if len(p) > 0}
 
@@ -69,13 +70,29 @@ class LogAgent:
     def match_path(self, file_path_obj):
         try:
             rel_parts = [p.upper() for p in file_path_obj.relative_to(self.root_dir).parts]
-            parts_set = set(rel_parts)
-            has_pn = any(self.re_pn_standard.match(p) for p in rel_parts)
-            for p_req_set in self.patterns:
-                if "PN" in p_req_set and not has_pn: continue
-                if (p_req_set - {"PN"}).issubset(parts_set): return True
+            if any(any(b in part.lower() for b in self.block_list) for part in rel_parts):
+                return False
+            raw_patterns = [p.upper().split('/') for p in self.original_patterns]
+            for pattern in raw_patterns:
+                idx = 0
+                match_count = 0
+                for part in rel_parts:
+                    target = pattern[idx]
+                    is_match = False
+                    if target == "PN":
+                        if self.re_pn_standard.match(part):
+                            is_match = True
+                    else:
+                        if target == part:
+                            is_match = True
+                    if is_match:
+                        match_count += 1
+                        idx += 1
+                        if match_count == len(pattern):
+                            return True
             return False
-        except: return False
+        except:
+            return False
 
     def get_fast_time(self, entry_path, f_stat, mtime_dt):
         # file_name = os.path.basename(entry_path)
@@ -112,8 +129,9 @@ class LogAgent:
 
             # 判定 stage
             stage = "BFT"
+            path_parts = set(path_str_upper.replace('\\', '/').replace('_', '/').split('/'))
             for s in self.valid_stages:
-                if f"/{s}/" in path_str_upper or f"_{s}_" in path_str_upper:
+                if s in path_parts:
                     stage = s
                     break
 
@@ -223,6 +241,8 @@ class LogAgent:
 
         for entry, pn, f_stat in self.fast_scan(self.root_dir, last_ts):
             if not self.running: break
+            if not self.match_path(Path(entry.path)):
+                continue
             parsedata = self.parse_data(entry, pn, f_stat)
             if parsedata:
                 scanned_count += 1

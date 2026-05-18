@@ -5,6 +5,7 @@ import os
 import subprocess
 from app import db
 from app.utils.utils import load_ip_map, get_target_year, CACHE_DIR
+from app.utils.smb_pool import smb_pool
 
 tree_bp = Blueprint('tree_bp', __name__)
 
@@ -71,12 +72,9 @@ def preview_log():
     server_name, rel_path = request.args.get('server'), request.args.get('path')
     ip = load_ip_map().get(server_name)
     if not ip: return jsonify({"error": "IP not found"}), 404
-    safe_path = rel_path.replace('/', '_').replace('\\', '_')
-    local_file = os.path.join(CACHE_DIR, f"{server_name}_{safe_path}")
-    if not os.path.exists(local_file):
-        try: subprocess.run(['smbget', '-a', '-n', f"smb://{ip}/{rel_path.lstrip('/')}", '-o', local_file], timeout=15, check=True)
-        except: return jsonify({"error": "SMB failed"}), 500
     try:
+        local_file, filename = smb_pool.get_local_cache(server_name, rel_path, ip, CACHE_DIR)
         with open(local_file, 'r', encoding='utf-8', errors='ignore') as f:
-            return jsonify({"content": f.read(), "filename": os.path.basename(rel_path)})
-    except Exception as e: return jsonify({"error": str(e)}), 500
+            return jsonify({"content": f.read(), "filename": filename})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
