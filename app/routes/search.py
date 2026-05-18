@@ -7,6 +7,7 @@ import io
 from sqlalchemy import text
 from app import db
 from app.utils.utils import load_ip_map, clean_cache, CACHE_DIR, get_target_year
+from app.utils.smb_pool import smb_pool
 
 search_bp = Blueprint('search_bp', __name__)
 
@@ -123,38 +124,44 @@ def logs_server_side():
 @search_bp.route('/download/<server_name>/<path:rel_path>')
 def download_log(server_name, rel_path):
     clean_cache()
-    ip_map = load_ip_map()
-    ip = ip_map.get(server_name)
-    if not ip: return "IP not found", 404
-    safe_filename = rel_path.replace('/', '_').replace('\\', '_')
-    local_file = os.path.join(CACHE_DIR, f"{server_name}_{safe_filename}")
-    if not os.path.exists(local_file):
-        smb_url = f"smb://{ip}/{rel_path.lstrip('/')}"
-        try:
-            subprocess.run(['smbget', '-a', '-n', smb_url, '-o', local_file], timeout=20, check=True)
-        except: return "SMB Download Failed", 500
-    return send_file(local_file, as_attachment=True, download_name=os.path.basename(rel_path))
+    ip = load_ip_map().get(server_name)
+    if not ip:
+        return "IP not found", 404
+    try:
+        local_file, filename = smb_pool.get_local_cache(server_name, rel_path, ip, CACHE_DIR)
+        return send_file(local_file, as_attachment=True, download_name=filename)
+    except Exception as e:
+        return f"SMB Download Failed: {str(e)}", 500
 
 @search_bp.route('/api/batch_download', methods=['POST'])
 def batch_download():
     clean_cache()
     data = request.json
     files_to_pack = data.get('files', [])
-    if not files_to_pack: return jsonify({"error": "No files selected"}), 400
+    if not files_to_pack:
+        return jsonify({"error": "No files selected"}), 400
+
     memory_output = io.BytesIO()
+    ip_map = load_ip_map()
+
     with zipfile.ZipFile(memory_output, 'w', zipfile.ZIP_DEFLATED) as zf:
-        ip_map = load_ip_map()
         for item in files_to_pack:
             srv, rel_path = item.get('server'), item.get('path')
             ip = ip_map.get(srv)
-            if not ip: continue
-            safe_name = rel_path.replace('/', '_').replace('\\', '_')
-            local_file = os.path.join(CACHE_DIR, f"{srv}_{safe_name}")
-            #local_file = os.path.join(CACHE_DIR, f"{srv}_{rel_path.replace('/', '_').replace('\\', '_')}")
-            if not os.path.exists(local_file):
-                try: subprocess.run(['smbget', '-a', '-n', f"smb://{ip}/{rel_path.lstrip('/')}", '-o', local_file], timeout=15)
-                except: continue
-            if os.path.exists(local_file):
-                zf.write(local_file, arcname=f"{srv}_{os.path.basename(rel_path)}")
+            if not ip:
+                continue
+            try:
+                local_file, filename = smb_pool.get_local_cache(srv, rel_path, ip, CACHE_DIR)
+                if os.path.exists(local_file):
+                    zf.write(local_file, arcname=f"{srv}_{filename}")
+            except Exception:
+                continue
+
     memory_output.seek(0)
-    return send_file(memory_output, mimetype='application/zip', as_attachment=True, download_name=f"batch_logs_{datetime.now().strftime('%Y%m%d%H%M')}.zip")
+    time_str = datetime.now().strftime('%Y%m%d%H%M')
+    return send_file(
+        memory_output,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f"batch_logs_{time_str}.zip"
+    )
