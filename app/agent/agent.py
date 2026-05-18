@@ -27,7 +27,7 @@ class LogAgent:
         current_script_dir = Path(__file__).parent
         self.state_file = current_script_dir / f".state_{self.server_name}.json"
 
-        self.re_pn_standard = re.compile(r'^[123][A-Z0-9]{10,}')
+        self.re_pn_standard = re.compile(r'^[123][A-Z0-9]{10}$')
         self.load_config()
 
         self.batch_size = 1000
