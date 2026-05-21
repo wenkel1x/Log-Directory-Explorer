@@ -11,16 +11,16 @@ $(document).ready(function() {
         setTimeout(() => { $('#btn_search').click(); }, 500);
     }
 
-    // 初始化年份下拉框
-    $.get('/api/get_years', function(data) {
+    // 初始化年份下拉框：带上多租户钥匙
+    $.get('/api/get_years', { project_key: CURRENT_PROJECT_KEY }, function(data) {
         if (data.status === 'success') {
             let options = data.years.map(y => `<option value="${y}">${y} Year</option>`).join('');
             $('#s_year').append(options);
         }
     });
 
-    //初始化 Server 下拉框
-    $.get('/api/get_servers', function(data) {
+    // 初始化 Server 下拉框：带上多租户钥匙，防止拉错 BFT/ICT 资产
+    $.get('/api/get_servers', { project_key: CURRENT_PROJECT_KEY }, function(data) {
         if (data.status === 'success') {
             let options = data.servers.map(s => `<option value="${s}">${s}</option>`).join('');
             $('#s_machine').append(options);
@@ -43,6 +43,8 @@ $(document).ready(function() {
                 d.s_pn = $.trim($('#s_pn').val());
                 d.s_status = $('#s_status').val();
                 d.s_stage = $('#s_stage').val();
+                // 💡 4. DataTable 服务端异步翻页/搜索时，自动注入隔离令牌
+                d.project_key = CURRENT_PROJECT_KEY;
             }
         },
         columns: [
@@ -63,12 +65,13 @@ $(document).ready(function() {
                 orderable: false,
                 render: function(data, type, row) {
                     // row.server 和 row.path 是后端返回的原始字段
+                    //下载链接 `href` 这里，必须使用 `?project_key=` 将钥匙传给后端下载路由
                     return `
                         <div class="btn-group">
                             <button class="btn btn-sm btn-outline-primary" onclick="openPreview('${row.server}', '${row.path}')">
                                 <i class="bi bi-eye"></i> View
                             </button>
-                            <a href="/download/${row.server}/${row.path}" class="btn btn-sm btn-outline-success">
+                            <a href="/download/${row.server}/${row.path}?project_key=${CURRENT_PROJECT_KEY}" class="btn btn-sm btn-outline-success">
                                 <i class="bi bi-download"></i>
                             </a>
                         </div>
@@ -93,7 +96,12 @@ $(document).ready(function() {
         contentArea.text('Fetching from server RAM...');
         $('#previewModal').modal('show');
 
-        $.get('/api/preview_log', { server: server, path: path }, function(data) {
+        //预览日志接口：同样追加多租户钥匙，保障物理防越权
+        $.get('/api/preview_log', {
+            server: server,
+            path: path,
+            project_key: CURRENT_PROJECT_KEY
+        }, function(data) {
             if (data.content) {
                 $('#previewTitle').text("File: " + data.filename);
                 contentArea.text(data.content);
@@ -104,11 +112,6 @@ $(document).ready(function() {
             contentArea.html('<div class="p-4 text-danger">Fetch failed.</div>');
         });
     };
-
-    // window.copyLogContent = function() {
-    //     const text = $('#previewContent').text();
-    //     navigator.clipboard.writeText(text).then(() => alert("Copied to clipboard!"));
-    // };
 
     window.saveLogFromMemory = function() {
         const text = $('#previewContent').text();

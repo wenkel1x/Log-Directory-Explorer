@@ -1,9 +1,10 @@
 $(document).ready(function() {
     let snDataTable = null;
 
-    // --- 2. 树形菜单初始化 ---
+    // --- 树形菜单初始化 ---
     window.loadInitialTree = function() {
-        $.get('/api/get_tree_base', function(data) {
+        // 加载基础树：带上多租户钥匙，让后端只返回当前业务线的服务器资产
+        $.get('/api/get_tree_base', { project_key: CURRENT_PROJECT_KEY }, function(data) {
             let html = '';
             for (let server in data) {
                 html += `
@@ -31,7 +32,7 @@ $(document).ready(function() {
 
     loadInitialTree(); // 执行初始化
 
-    // --- 3. 树形逐级加载逻辑 ---
+    // --- 树形逐级加载逻辑 ---
     window.toggleNode = function(id) {
         $(`#icon_${id}`).toggleClass('rotate-90');
         toggleBsCollapse(`child_${id}`);
@@ -41,21 +42,20 @@ $(document).ready(function() {
         let id = `child_${srv}_${shr}`;
         $(`#icon_${srv}_${shr}`).toggleClass('rotate-90');
         toggleBsCollapse(id);
-        
         if ($(`#${id}`).html().trim() === "") {
-            $.get('/api/get_pns', {server: srv, share: shr}, function(pns) {
-                // 注意：此时 pns 是对象数组
+            // 加载 PN 列表：带上多租户钥匙
+            $.get('/api/get_pns', { server: srv, share: shr, project_key: CURRENT_PROJECT_KEY }, function(pns) {
                 $(`#${id}`).html(pns.map(pnObj => {
-                    // 1. 显式提取字符串名称
                     const pnName = pnObj.name; 
                     const hasData = pnObj.has_data;
-                
-                    // 2. 根据状态定义样式
                     const textColor = hasData ? 'text-info' : 'text-muted';
-                    // 如果没数据，不绑定 onclick 事件，且不显示展开箭头
                     const clickAction = hasData ? `onclick="loadMonths('${srv}', '${shr}', '${pnName}')"` : '';
                     const iconClass = hasData ? '' : 'd-none'; 
-                    const statusIcon = hasData ? '' : '<i class="bi bi-hand-index-thumb text-muted opacity-50" style="font-size: 1rem; transform: rotate(90deg); display: inline-block; vertical-align: middle; margin-left: 8px;" title="No data"></i>';                    return `
+                    const statusIcon = hasData ? '' : '<i class="bi bi-hand-index-thumb text-muted opacity-50" style="font-size: 1rem; transform: rotate(90deg); display: inline-block; vertical-align: middle; margin-left: 8px;" title="No data"></i>';
+                    // 跳转高级搜索：把 `/bft/search` 统一改为 `/search`，并带上当前 project_key 令牌
+                    const tracePnUrl = `/search?s_pn=${encodeURIComponent(pnName)}&project_key=${CURRENT_PROJECT_KEY}`;
+
+                    return `
                         <div class="tree-node">
                             <div class="d-flex justify-content-between align-items-center pe-2">
                                 <div class="node-content ${textColor}" ${clickAction} style="cursor:${hasData ? 'pointer' : 'default'}">
@@ -63,7 +63,7 @@ $(document).ready(function() {
                                     <i class="bi bi-box-seam me-2"></i> 
                                     ${pnName} ${statusIcon}
                                 </div>
-                                <a href="/bft/search?s_pn=${encodeURIComponent(pnName)}" class="text-info" title="Trace this PN">
+                                <a href="${tracePnUrl}" class="text-info" title="Trace this PN">
                                     <i class="bi bi-search" style="font-size: 0.8rem;"></i>
                                 </a>
                             </div>
@@ -79,7 +79,8 @@ $(document).ready(function() {
         $(`#icon_${srv}_${shr}_${pn}`).toggleClass('rotate-90');
         toggleBsCollapse(id);
         if ($(`#${id}`).html().trim() === "") {
-            $.get('/api/get_months', {pn: pn}, function(mons) {
+            //加载月份：带上多租户钥匙，保障表映射安全
+            $.get('/api/get_months', { pn: pn, project_key: CURRENT_PROJECT_KEY }, function(mons) {
                 $(`#${id}`).html(mons.map(mon => `
                     <div class="tree-node py-1">
                         <div class="node-content text-muted small" onclick="loadMonthLogs('${pn}', '${mon.num}')" style="cursor:pointer">
@@ -95,7 +96,7 @@ $(document).ready(function() {
         if (el) bootstrap.Collapse.getOrCreateInstance(el).toggle();
     }
 
-    // --- 4. DataTables 加载日志列表 (核心预览触发) ---
+    // ---  DataTables 加载日志列表 (核心预览触发) ---
     window.loadMonthLogs = function(pn, month) {
         const year = new Date().getFullYear();
         $('#tableTitle').html(`<i class="bi bi-calendar-check me-2"></i> ${pn} [${year}-${month}]`);
@@ -107,7 +108,8 @@ $(document).ready(function() {
         snDataTable = $('#snTable').DataTable({
             ajax: {
                 url: `/api/get_month_logs`,
-                data: { pn: pn, month: month, year: year },
+                // DataTable 获取日志明细：必须将 project_key 传给后端
+                data: { pn: pn, month: month, year: year, project_key: CURRENT_PROJECT_KEY },
                 dataSrc: 'data'
             },
             columns: [
@@ -140,16 +142,20 @@ $(document).ready(function() {
                     data: 'last_time'
                 },
                 {
-                    // 6. 操作列 (包含 View, Down, 和新增的跳转搜索)
+                    // 6. 操作列
                     data: null,
                     orderable: false,
                     render: function(data, type, row) {
-                        // 这里的 pn 变量是从 loadMonthLogs(pn, month) 函数参数里传进来的
-                        const searchUrl = `/bft/search?s_sn=${encodeURIComponent(row.sn)}&s_pn=${encodeURIComponent(pn)}`;
+                        //跳转高级搜索：将 `/bft/search` 规范为 `/search`，且追加隔离钥匙
+                        const searchUrl = `/search?s_sn=${encodeURIComponent(row.sn)}&s_pn=${encodeURIComponent(pn)}&project_key=${CURRENT_PROJECT_KEY}`;
+
+                        // 下载链接：也需要动态挂载 `?project_key=`
+                        const downloadUrl = `${row.download_url}?project_key=${CURRENT_PROJECT_KEY}`;
+
                         return `
                         <div class="btn-group">
                             <button class="btn btn-xs btn-outline-primary py-0" onclick="openPreview('${row.server}', '${row.path}')">View</button>
-                            <a href="${row.download_url}" class="btn btn-xs btn-outline-success py-0">Down</a>
+                            <a href="${downloadUrl}" class="btn btn-xs btn-outline-success py-0">Down</a>
                             <a href="${searchUrl}" class="btn btn-xs btn-outline-info py-0" title="Trace this SN in Global Search">
                                 <i class="bi bi-search"></i>
                             </a>
@@ -165,11 +171,13 @@ $(document).ready(function() {
         $('#snTable tbody').off('change', '.row-check').on('change', '.row-check', updateBatchUI);
     };
 
-    // --- 5. 预览逻辑 (Modal) ---
+    // --- 预览逻辑 (Modal) ---
     window.openPreview = function(server, path) {
         $('#previewContent').text('Loading from Memory...');
         $('#previewModal').modal('show');
-        $.get('/api/preview_log', {server: server, path: path}, function(data) {
+
+        //预览日志接口：追加隔离令牌
+        $.get('/api/preview_log', { server: server, path: path, project_key: CURRENT_PROJECT_KEY }, function(data) {
             if (data.content) {
                 $('#previewTitle').text("Preview: " + data.filename);
                 $('#previewContent').text(data.content);
@@ -199,7 +207,7 @@ $(document).ready(function() {
         }, 200);
     };
 
-    // --- 6. 批量下载逻辑 ---
+    // --- 批量下载逻辑 ---
     function updateBatchUI() {
         let selected = $('.row-check:checked');
         $('#selCount').text(selected.length);
@@ -223,10 +231,14 @@ $(document).ready(function() {
         const originalHtml = btn.html();
         btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 打包中...');
 
+        //批量下载接口：在 POST 的 JSON Payload 中注入 project_key 令牌
         fetch('/api/batch_download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files: selectedFiles })
+            body: JSON.stringify({
+                files: selectedFiles,
+                project_key: CURRENT_PROJECT_KEY
+            })
         })
         .then(res => res.blob())
         .then(blob => {
