@@ -6,22 +6,38 @@ from flask import request
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 IP_MAP_PATH = os.path.join(APP_DIR,'ip_map.json')
-# 缓存放在项目根目录
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(APP_DIR)), 'static','cache')
 MAX_CACHE_GB = 1.5
 MAX_CACHE_BYTES = MAX_CACHE_GB * 1024 * 1024 * 1024
 
+class SmartIpMap(dict):
+    def __init__(self, full_map):
+        super().__init__(full_map)
+        self.full_map = full_map
+
+    def get(self, key, default=None):
+        project_key = (
+            request.args.get('project_key') or
+            (request.json and request.json.get('project_key')) or
+            request.form.get('project_key') or
+            'log_system'
+        ).strip().lower()
+
+        if project_key in self.full_map and isinstance(self.full_map[project_key], dict):
+            return self.full_map[project_key].get(key, default)
+        return self.full_map.get(key, default)
+
 def load_ip_map():
-    if not os.path.exists(IP_MAP_PATH): return {}
+    if not os.path.exists(IP_MAP_PATH):
+        return SmartIpMap({})
     try:
         with open(IP_MAP_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except: return {}
+            return SmartIpMap(json.load(f))
+    except:
+        return SmartIpMap({})
 
 def get_target_year():
-    # 优先看 URL 参数里有没有传 year，没有则用今年
     return request.args.get('year', str(datetime.now().year))
-    #return str(datetime.now().year)
 
 def clean_cache():
     if not os.path.exists(CACHE_DIR):

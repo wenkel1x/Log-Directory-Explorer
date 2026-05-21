@@ -86,7 +86,6 @@ def process_batch_insert(data):
         if all(tree_key):
             tree_updates[tree_key] = max(tree_updates.get(tree_key, 0), int(year))
 
-    # 在当前锁定的物理库事务中执行批量写入
     for attempt in range(3):
         try:
             with db_engine.begin() as conn:
@@ -121,8 +120,8 @@ def process_batch_insert(data):
 def start_worker():
     global LOCAL_TABLE_CACHE
     with flask_app.app_context():
-        # 初始化时，遍历加载所有绑定的数据库中的现有表名，做全局预热
-        for p_key, bind_key in PROJECT_MAP.items():
+        LISTEN_QUEUES = [f"log_upload_queue:{p_key}" for p_key in PROJECT_MAP.keys()]
+        for _, bind_key in PROJECT_MAP.items():
             try:
                 engine = db.get_engine(bind=bind_key)
                 with engine.begin() as conn:
@@ -131,27 +130,36 @@ def start_worker():
                         LOCAL_TABLE_CACHE.add(f"{bind_key}:{row[0]}")
             except Exception as e:
                 print(f"Warning: Cannot cache tables for bind [{bind_key}]: {e}")
-        print(f"[*] Redis Worker Started. Cached tables: {len(LOCAL_TABLE_CACHE)}")
+
+        print(f"[*] Redis Worker Started.")
+        print(f"[*] Listening Queues: {LISTEN_QUEUES}")
+        print(f"[*] Cached tables count: {len(LOCAL_TABLE_CACHE)}")
+
         while True:
             try:
-                if r.get(GLOBAL_PAUSE_KEY) == b"1":
-                    time.sleep(2)
+                res = r.brpop(LISTEN_QUEUES, timeout=5)
+                if not res: continue
+
+                active_queue = res[0].decode('utf-8')
+                raw_data = json.loads(res[1])
+                project_key = raw_data.get('project_key', 'log_system').strip().lower()
+
+                pause_key = f"{project_key}_pause"
+                if r.get(pause_key) == b"1":
+                    r.lpush(active_queue, res[1])
+                    time.sleep(1)
                     continue
 
-                res = r.brpop("log_upload_queue", timeout=5)
-                if not res: continue
-                raw_data = json.loads(res[1])
                 if raw_data.get('type') == 'cleanup_task':
-                    r.setex(GLOBAL_PAUSE_KEY, 3600, "1")
+                    r.setex(pause_key, 3600, "1")
                     try:
                         handle_cleanup_task(raw_data)
                     finally:
-                        r.delete(GLOBAL_PAUSE_KEY)
+                        r.delete(pause_key)
                 else:
                     process_batch_insert(raw_data)
             except Exception as e:
                 print(f"--- [Worker Global Error]: {str(e)}")
                 time.sleep(1)
-
 if __name__ == '__main__':
     start_worker()

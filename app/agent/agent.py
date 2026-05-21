@@ -209,14 +209,19 @@ class LogAgent:
         return False
 
     def report_self(self):
-        """上报自身 IP 及状态"""
-        payload = {"server_name": self.server_name, "ip": ""}
+        payload = {
+            "project_key": self.project_key,
+            "server_name": self.server_name,
+            "ip": ""
+        }
         try:
             json_data = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(self.report_url, data=json_data, headers={'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, timeout=10) as response:
-                pass
-        except: pass
+                resp_data = json.loads(response.read().decode('utf-8'))
+                print(f"[{datetime.now()}] IP Reported Successfully to [{resp_data.get('project')}].")
+        except Exception as e:
+            print(f"[{datetime.now()}] WARNING: IP Report failed: {e}")
     def run(self):
         self.report_self()
         current_scan_id = int(time.time())

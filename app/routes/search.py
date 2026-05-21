@@ -10,7 +10,6 @@ from app.utils.smb_pool import smb_pool
 
 search_bp = Blueprint('search_bp', __name__)
 
-# 统一收拢原本硬编码的 /bft/search
 @search_bp.route('/search')
 def index():
     ip_data = load_ip_map()
