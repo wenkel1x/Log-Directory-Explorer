@@ -18,6 +18,7 @@ class LogAgent:
         self.server_name = args.name.lower() if args.name else socket.gethostname().lower()
         self.mode = args.mode  
         self.ext_list = [e.lower() for e in args.ext.split(',')]
+        self.project_key = args.project_key.strip().lower()
 
         self.api_base = "http://10.94.99.153/svc"
         self.upload_url = f"{self.api_base}/upload_batch"
@@ -95,12 +96,6 @@ class LogAgent:
             return False
 
     def get_fast_time(self, entry_path, f_stat, mtime_dt):
-        # file_name = os.path.basename(entry_path)
-        # match = self.re_year.search(file_name)
-        # if match:
-        #     year = match.group(1)
-        #     return f"{year}{mtime_dt.strftime('-%m-%d %H:%M:%S')}"
-        # 2. 如果文件名没年份，看 ctime (状态改变时间) 是否合法
         try:
             ctime_dt = datetime.fromtimestamp(f_stat.st_ctime)
             if 2010 <= ctime_dt.year <= self.current_year:
@@ -190,7 +185,12 @@ class LogAgent:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                data = json.dumps({"items": items, "scan_id": scan_id}).encode('utf-8')
+                payload = {
+                    "project_key": self.project_key,
+                    "items": items,
+                    "scan_id": scan_id
+                }
+                data = json.dumps(payload).encode('utf-8')
                 req = urllib.request.Request(
                     self.upload_url,
                     data=data,
@@ -299,6 +299,7 @@ class LogAgent:
             print(f"[{datetime.now()}] All batches OK. Triggering cleanup...")
             try:
                 cleanup_payload = {
+                    "project_key": self.project_key,
                     "server_name": self.server_name,
                     "share_name": self.root_name,
                     "scan_id": current_scan_id
@@ -333,5 +334,6 @@ if __name__ == "__main__":
     parser.add_argument("--name")
     parser.add_argument("--mode", choices=['full', 'incr'], default='incr')
     parser.add_argument("--ext", default=".log,.txt")
+    parser.add_argument('--project_key', type=str, default='log_system', help="Target project database: log_system (BFT) or ict_log_system (ICT)")
     args = parser.parse_args()
     LogAgent(args).run()
