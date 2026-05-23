@@ -150,34 +150,47 @@ class LogAgent:
             }
         except: return None
 
-    def fast_scan(self, current_dir, last_ts, current_pn="UNKNOWN", depth=0):
-        if not self.running: return
+    def fast_scan(self, current_dir, last_ts, current_pn="UNKNOWN", depth=0, current_path_parts=None):
+        if not self.running:
+            return
+        if current_path_parts is None:
+            current_path_parts = []
         try:
             with os.scandir(current_dir) as it:
                 for entry in it:
+                    if not self.running:
+                        break
+                    entry_name_lower = entry.name.lower()
+                    if entry_name_lower in self.block_list:
+                        continue
                     if entry.is_dir(follow_symlinks=False):
-                        if entry.is_symlink(): continue
-                        if entry.name.lower() in self.block_list: continue
+                        if entry.is_symlink():
+                            continue
                         dirname_upper = entry.name.upper()
-
+                        next_path_parts = current_path_parts + [dirname_upper]
                         if depth == 0:
                             is_pn = ("PN" in self.first_level_allowed and bool(self.re_pn_standard.match(dirname_upper)))
                             is_keyword = dirname_upper in self.first_level_allowed and dirname_upper != "PN"
-                            if not (is_pn or is_keyword): continue
+                            if not (is_pn or is_keyword):
+                                continue
                             next_pn = dirname_upper if is_pn else "UNKNOWN"
                         else:
-                            next_pn = current_pn
                             if os.path.basename(current_dir).upper() in self.pn_parents:
                                 next_pn = dirname_upper
                             elif self.re_pn_standard.match(dirname_upper):
                                 next_pn = dirname_upper
-                        yield from self.fast_scan(entry.path, last_ts, next_pn, depth + 1)
+                            else:
+                                next_pn = current_pn
+
+                        yield from self.fast_scan(entry.path, last_ts, next_pn, depth + 1, next_path_parts)
                     elif entry.is_file():
-                        if any(entry.name.lower().endswith(ext) for ext in self.ext_list):
+                        if any(entry_name_lower.endswith(ext) for ext in self.ext_list):
                             f_stat = entry.stat()
                             if f_stat.st_mtime > last_ts:
-                                yield entry, current_pn, f_stat
-        except: pass
+                                if self.validate_structural_path(current_path_parts):
+                                    yield entry, current_pn, f_stat, current_path_parts
+        except Exception:
+            pass
 
     def post_data(self, items, scan_id):
         if not items: return True
@@ -222,6 +235,7 @@ class LogAgent:
                 print(f"[{datetime.now()}] IP Reported Successfully to [{resp_data.get('project')}].")
         except Exception as e:
             print(f"[{datetime.now()}] WARNING: IP Report failed: {e}")
+
     def run(self):
         self.report_self()
         current_scan_id = int(time.time())

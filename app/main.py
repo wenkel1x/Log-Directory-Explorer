@@ -16,8 +16,8 @@ def index():
             'name': 'SMT ICT Log System',
             'desc': 'ICT Station log center, supporting tree view and advanced search.',
             'status': 'Active',
-            'tree_url': '/explorer?project_key=ict_log_System',
-            'search_url': '/search?project_key=ict_log_System',
+            'tree_url': '/explorer?project_key=ict_log_system',
+            'search_url': '/search?project_key=ict_log_system',
             'icon': 'bi-motherboard',
             'color': 'success'
         },

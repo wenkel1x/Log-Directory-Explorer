@@ -4,24 +4,25 @@ import redis
 import os
 import threading
 
+from app.utils.utils import IP_MAP_PATH 
+
 upload_bp = Blueprint('upload_bp', __name__)
 r_client = redis.Redis(host='127.0.0.1', port=6379, db=0)
 
-IP_MAP_PATH = "ip_map.json"
 file_lock = threading.Lock()
 
-@upload_bp.route('/svc/upload_batch', methods=['POST'])
-def upload_batch():
-    data = request.json
-    if not data or 'items' not in data:
-        return jsonify({"status": "error", "msg": "Invalid data format"}), 400
-
+@upload_bp.route('/svc/report_ip', methods=['POST'])
+def report_ip():
+    data = request.json or {}
     project_key = data.get('project_key', 'log_system').strip().lower()
     items = data.get('items', [])
-    server_name = items[0].get('server_name') if items else data.get('server_name')
+
+    server_name = data.get('server_name')
+    if not server_name and items:
+        server_name = items[0].get('server_name')
 
     if not server_name:
-        return jsonify({"status": "error", "msg": "Missing server_name"}), 400
+        return jsonify({"status": "error", "msg": "Missing required parameter: server_name"}), 400
 
     detected_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
     if detected_ip and ',' in detected_ip:
@@ -39,9 +40,10 @@ def upload_batch():
                         full_ip_map = json.load(f)
                 except:
                     full_ip_map = {}
+     
             if project_key not in full_ip_map:
                 full_ip_map[project_key] = {}
-                
+ 
             current_project_map = full_ip_map[project_key]
             dirty = False
 
@@ -59,6 +61,7 @@ def upload_batch():
                 full_ip_map[project_key] = current_project_map
                 with open(IP_MAP_PATH, 'w', encoding='utf-8') as f:
                     json.dump(full_ip_map, f, indent=4, ensure_ascii=False)
+          
         return jsonify({
             "status": "success",
             "mode": "sync",
@@ -70,12 +73,12 @@ def upload_batch():
     except Exception as e:
         return jsonify({"status": "error", "msg": f"IP recording failed: {str(e)}"}), 500
 
-
 @upload_bp.route('/svc/upload_batch', methods=['POST'])
 def upload_batch():
     data = request.json
     if not data or 'items' not in data:
         return jsonify({"status": "error", "msg": "Invalid data format"}), 400
+
     try:
         project_key = data.get('project_key', 'log_system').strip().lower()
         queue_name = f"log_upload_queue:{project_key}"
@@ -86,8 +89,10 @@ def upload_batch():
             "scan_id": data.get('scan_id', 0),
             "items": data.get('items', [])
         }
+
         r_client.rpush(queue_name, json.dumps(payload))
         return jsonify({"status": "success", "mode": "async", "target_queue": queue_name}), 200
+
     except Exception as e:
         return jsonify({"status": "error", "msg": f"Queue push failed: {str(e)}"}), 500
 
@@ -100,6 +105,7 @@ def cleanup_stale_data():
 
     if not all([s_name, sh_name, s_id]):
         return jsonify({"status": "error", "msg": "Missing params for cleanup"}), 400
+
     try:
         project_key = data.get('project_key', 'log_system').strip().lower()
         queue_name = f"log_upload_queue:{project_key}"

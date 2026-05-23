@@ -14,7 +14,7 @@ def _configure_common(app):
 
     app.config['SQLALCHEMY_BINDS'] = {
         'log_system': f'mysql+pymysql://root:{safe_password}@127.0.0.1:3306/log_system?charset=utf8mb4',
-        'ict_log_System': f'mysql+pymysql://root:{safe_password}@127.0.0.1:3306/ict_log_System?charset=utf8mb4'
+        'ict_log_system': f'mysql+pymysql://root:{safe_password}@127.0.0.1:3306/ict_log_system?charset=utf8mb4'
     }
 
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {

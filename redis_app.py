@@ -8,11 +8,11 @@ from app import create_ingestion_app, db
 
 PROJECT_MAP = {
     'log_system': 'log_system',
-    'ict_log_system': 'ict_log_System',
+    'ict_log_system': 'ict_log_system',
 }
 
 flask_app = create_ingestion_app()
-r = redis.Redis(host='127.0.0.1', port=6379, db=0)
+redis_client = redis.Redis(host='127.0.0.1', port=6379, db=0)
 
 GLOBAL_PAUSE_KEY = "log_system_pause"
 LOCAL_TABLE_CACHE = set()
@@ -22,16 +22,21 @@ def handle_cleanup_task(task_data):
     s_name = task_data.get('server_name')
     sh_name = task_data.get('share_name')
     s_id = task_data.get('scan_id')
-    # 提取项目标签，切到对应的数据库 Engine
+
     project_key = task_data.get('project_key', 'log_system').strip().lower()
     if project_key not in PROJECT_MAP: project_key = 'log_system'
     actual_bind_key = PROJECT_MAP[project_key]
-    db_engine = db.get_engine(bind=actual_bind_key)
+
+    db_engine = db.engines[actual_bind_key]
     print(f"DEBUG: Starting cleanup for DB Bind: [{actual_bind_key}]")
     try:
+        all_tables = []
         with db_engine.begin() as conn:
             result = conn.execute(text("SHOW TABLES LIKE 'log_index_%'")).fetchall()
-            all_tables = [row[0] for row in result if row[0] != 'log_index_template']
+            for t_row in result:
+                if t_row[0] != 'log_index_template':
+                    all_tables.append(t_row[0])
+
         total_deleted = 0
         for table_name in all_tables:
             while True:
@@ -45,8 +50,41 @@ def handle_cleanup_task(task_data):
                     count = res.rowcount
                     total_deleted += count
                 if count < 5000: break
-                time.sleep(0.05)
-        print(f"[{actual_bind_key} CLEANUP] FINISH. Total deleted: {total_deleted}")
+                time.sleep(0.01)
+        print(f"[{actual_bind_key} CLEANUP] Log indices cleaned. Total deleted: {total_deleted}")
+        print(f"DEBUG: Extracting alive PNs with their respective years...")
+        alive_pn_years = set()
+
+        for table_name in all_tables:
+            try:
+                table_year = int(table_name.replace('log_index_', ''))
+            except ValueError:
+                continue
+            with db_engine.begin() as conn:
+                pn_sql = text(f"SELECT DISTINCT pn FROM `{table_name}` WHERE server_name = :s_name AND share_name = :sh_name")
+                rows = conn.execute(pn_sql, {"s_name": s_name, "sh_name": sh_name}).fetchall()
+                for db_data_row in rows:
+                    if db_data_row[0]:
+                        alive_pn_years.add((table_year, db_data_row[0]))
+
+        with db_engine.begin() as conn:
+            current_tree_sql = text("""
+                SELECT id, last_active_year, pn FROM `log_tree_data`
+                WHERE server_name = :s_name AND share_name = :sh_name
+            """)
+            tree_rows = conn.execute(current_tree_sql, {"s_name": s_name, "sh_name": sh_name}).fetchall()
+
+            ids_to_delete = []
+            for t_id, t_year, t_pn in tree_rows:
+                if (t_year, t_pn) not in alive_pn_years:
+                    ids_to_delete.append(t_id)
+            if ids_to_delete:
+                delete_tree_sql = text("DELETE FROM `log_tree_data` WHERE id IN :ids")
+                tree_res = conn.execute(delete_tree_sql, {"ids": ids_to_delete})
+                tree_deleted_count = tree_res.rowcount
+            else:
+                tree_deleted_count = 0
+        print(f"[{actual_bind_key} TREE CLEANUP] FINISH. Removed {tree_deleted_count} stale PN rows from log_tree_data.")
     except Exception as e:
         print(f"Cleanup Error on [{actual_bind_key}]: {e}")
 
@@ -55,13 +93,12 @@ def process_batch_insert(data):
     items_list = data.get('items', [])
     scan_id = data.get('scan_id', 0)
     if not items_list: return
-    # 从 Redis 数据包中识别 project_key
+
     project_key = data.get('project_key', 'log_system').strip().lower()
     if project_key not in PROJECT_MAP: project_key = 'log_system'
 
-    # 通过绑定的 key 获取对应的物理库连接池 Engine
     actual_bind_key = PROJECT_MAP[project_key]
-    db_engine = db.get_engine(bind=actual_bind_key)
+    db_engine = db.engines[actual_bind_key]
 
     table_groups = {}
     tree_updates = {}
@@ -71,7 +108,6 @@ def process_batch_insert(data):
         year = log_time[:4] if len(log_time) >= 4 else "0000"
         t_name = f"log_index_{year}"
 
-        #动态建表检测（缓存加上实际绑定库前缀 actual_bind_key，防止跨库缓存混淆）
         cache_key = f"{actual_bind_key}:{t_name}"
         if cache_key not in LOCAL_TABLE_CACHE:
             with cache_lock:
@@ -123,11 +159,11 @@ def start_worker():
         LISTEN_QUEUES = [f"log_upload_queue:{p_key}" for p_key in PROJECT_MAP.keys()]
         for _, bind_key in PROJECT_MAP.items():
             try:
-                engine = db.get_engine(bind=bind_key)
+                engine = db.engines[bind_key]
                 with engine.begin() as conn:
                     rows = conn.execute(text("SHOW TABLES LIKE 'log_index_%'")).fetchall()
-                    for row in rows:
-                        LOCAL_TABLE_CACHE.add(f"{bind_key}:{row[0]}")
+                    for r_item in rows:
+                        LOCAL_TABLE_CACHE.add(f"{bind_key}:{r_item[0]}")
             except Exception as e:
                 print(f"Warning: Cannot cache tables for bind [{bind_key}]: {e}")
 
@@ -137,7 +173,7 @@ def start_worker():
 
         while True:
             try:
-                res = r.brpop(LISTEN_QUEUES, timeout=5)
+                res = redis_client.brpop(LISTEN_QUEUES, timeout=5)
                 if not res: continue
 
                 active_queue = res[0].decode('utf-8')
@@ -145,21 +181,22 @@ def start_worker():
                 project_key = raw_data.get('project_key', 'log_system').strip().lower()
 
                 pause_key = f"{project_key}_pause"
-                if r.get(pause_key) == b"1":
-                    r.lpush(active_queue, res[1])
+                if redis_client.get(pause_key) == b"1":
+                    redis_client.lpush(active_queue, res[1])
                     time.sleep(1)
                     continue
 
                 if raw_data.get('type') == 'cleanup_task':
-                    r.setex(pause_key, 3600, "1")
+                    redis_client.setex(pause_key, 3600, "1")
                     try:
                         handle_cleanup_task(raw_data)
                     finally:
-                        r.delete(pause_key)
+                        redis_client.delete(pause_key)
                 else:
                     process_batch_insert(raw_data)
             except Exception as e:
-                print(f"--- [Worker Global Error]: {str(e)}")
+                print(f"--- [Worker Global Error]: {str(e)}")      
                 time.sleep(1)
+
 if __name__ == '__main__':
     start_worker()

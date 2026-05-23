@@ -55,13 +55,11 @@ def get_servers():
 
 @search_bp.route('/api/logs_server_side', methods=['POST'])
 def logs_server_side():
-    # 重点：DataTables 的 POST 请求通常通过 form 表单提交参数
     project_key = request.form.get('project_key')
     draw = request.form.get('draw', type=int)
     start = request.form.get('start', type=int, default=0)
     length = request.form.get('length', type=int, default=50)
 
-    # 提取搜索参数
     filters = {
         "pn": request.form.get('s_pn'),
         "sn": request.form.get('s_sn'),
@@ -71,28 +69,38 @@ def logs_server_side():
     }
     s_year = request.form.get('s_year')
 
-    # 判断是否为无条件的首页加载
     is_blank_search = not any(filters.values())
 
     try:
-        # 动态切库安全验证
         engine = get_tenant_engine(project_key)
 
-        # 确定目标表年份
-        target_years = [datetime.now().year]
-        if s_year and s_year.isdigit():
-            target_years = [int(s_year)]
-
-        subqueries = []
-        sql_params = {**filters, "start": start, "length": length}
-        if filters["sn"]: sql_params["sn"] = f"{filters['sn']}%"
-
         with engine.connect() as conn:
+            result = conn.execute(text("SHOW TABLES LIKE 'log_index_2%'")).fetchall()
+            db_years = []
+            for row in result:
+                table_name = row[0]
+                if table_name == 'log_index_template': continue
+                parts = table_name.split('_')
+                if len(parts) >= 3 and parts[-1].isdigit():
+                    db_years.append(int(parts[-1]))
+            db_years = sorted(db_years, reverse=True)
+
+            if s_year and s_year.isdigit():
+                target_years = [int(s_year)]
+            else:
+                if is_blank_search:
+                    target_years = [db_years[0]] if db_years else [datetime.now().year]
+                else:
+                    target_years = db_years
+
+            subqueries = []
+            sql_params = {**filters, "start": start, "length": length}
+            if filters["sn"]: sql_params["sn"] = f"{filters['sn']}%"
+
+            # 3. 构造 UNION ALL 子查询
             for y in target_years:
                 table_name = f"log_index_{y}"
-                # 检查对应的年份分表在当前的租户库中是否存在
-                check = conn.execute(text(f"SHOW TABLES LIKE '{table_name}'")).fetchone()
-                if not check: continue
+                if y not in db_years: continue
 
                 where = ["1=1"]
                 if filters["pn"]:      where.append("pn = :pn")
@@ -101,28 +109,27 @@ def logs_server_side():
                 if filters["status"]:  where.append("status = :status")
                 if filters["stage"]:   where.append("stage = :stage")
 
-                sub_limit = ""
                 if is_blank_search:
-                    sub_limit = "LIMIT 5000"
-
-                subqueries.append(f"SELECT log_time, server_name, sn, pn, status, stage, relative_path FROM `{table_name}` WHERE {' AND '.join(where)} ORDER BY log_time DESC {sub_limit}")
-
+                    sql_line = f"SELECT log_time, server_name, sn, pn, status, stage, relative_path FROM `{table_name}` WHERE {' AND '.join(where)} ORDER BY log_time DESC LIMIT 5000"
+                else:
+                    sql_line = f"SELECT log_time, server_name, sn, pn, status, stage, relative_path FROM `{table_name}` WHERE {' AND '.join(where)}"
+                subqueries.append(sql_line)
             if not subqueries:
                 return jsonify({"draw": draw, "recordsTotal": 0, "recordsFiltered": 0, "data": []})
 
             union_sql = " UNION ALL ".join(subqueries)
 
-            # 优化计数：如果是初始化，直接返回一个假的总数
             if is_blank_search:
                 records_filtered = 5000
             else:
                 count_sql = text(f"SELECT COUNT(*) FROM ({union_sql}) as total")
                 records_filtered = conn.execute(count_sql, sql_params).scalar()
 
-            # 分页查询
+            # 分页查询（在这里统一负责所有的排序，效率最高最安全）
             final_sql = text(f"SELECT * FROM ({union_sql}) as combined ORDER BY log_time DESC LIMIT :start, :length")
             logs = conn.execute(final_sql, sql_params).fetchall()
 
+        # 6. 格式化输出给 DataTable
         data = [{
             "log_time": l[0].strftime('%Y-%m-%d %H:%M:%S') if l[0] else "",
             "server": l[1], "sn": l[2], "pn": l[3], "status": l[4], "stage": l[5], "path": l[6]
@@ -147,7 +154,7 @@ def download_log(server_name, rel_path):
     if not ip:
         return "IP not found", 404
     try:
-        local_file, filename = smb_pool.get_local_cache(server_name, rel_path, ip, CACHE_DIR)
+        local_file, filename = smb_pool.get_local_cache(server_name, rel_path, ip, CACHE_DIR, project_key=project_key)
         return send_file(local_file, as_attachment=True, download_name=filename)
     except Exception as e:
         return f"SMB Download Failed: {str(e)}", 500
@@ -173,7 +180,7 @@ def batch_download():
             if not ip:
                 continue
             try:
-                local_file, filename = smb_pool.get_local_cache(srv, rel_path, ip, CACHE_DIR)
+                local_file, filename = smb_pool.get_local_cache(srv, rel_path, ip, CACHE_DIR, project_key=project_key)
                 if os.path.exists(local_file):
                     zf.write(local_file, arcname=f"{srv}_{filename}")
             except Exception:

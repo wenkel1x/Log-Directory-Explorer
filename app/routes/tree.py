@@ -34,13 +34,19 @@ def get_pns():
     project_key = request.args.get('project_key')
     srv, shr = request.args.get('server'), request.args.get('share')
     year = get_target_year()
-
     sql = text(f"""
-        SELECT t.pn,
-               (SELECT 1 FROM log_index_{year} l WHERE l.pn = t.pn LIMIT 1) as has_data
-        FROM log_tree_data t
-        WHERE t.server_name = :s AND t.share_name = :sh
-        ORDER BY has_data DESC, t.last_active_year DESC, t.pn ASC
+    SELECT t.pn,
+    (
+        SELECT 1 FROM log_index_{year} l
+            WHERE l.pn = t.pn
+              AND l.server_name = :s
+              AND l.share_name = :sh
+            LIMIT 1
+    ) as has_data
+    FROM log_tree_data t
+    WHERE t.server_name = :s
+      AND t.share_name = :sh
+    ORDER BY has_data DESC, t.pn ASC
     """)
     try:
         engine = get_tenant_engine(project_key)
@@ -95,7 +101,8 @@ def preview_log():
     ip = load_ip_map().get(server_name)
     if not ip: return jsonify({"error": "IP not found"}), 404
     try:
-        local_file, filename = smb_pool.get_local_cache(server_name, rel_path, ip, CACHE_DIR)
+        local_file, filename = smb_pool.get_local_cache(server_name, rel_path, ip, CACHE_DIR, project_key=project_key)
+
         with open(local_file, 'r', encoding='utf-8', errors='ignore') as f:
             return jsonify({"content": f.read(), "filename": filename})
     except Exception as e:
