@@ -57,51 +57,58 @@ class IctLogAgent:
             file_name = entry.name
             if file_name.lower().endswith('.lnk') or file_name.startswith('.'):
                 return None
-            sn, status, raw_time_str = None, "PASS", None
+            sn, status, raw_time_str, stage = None, "PASS", None, "test_history"
 
-            # ========================================================
-            # Filename Parsing Logic
-            # ========================================================
             if anchor_type == "history":
                 match = self.re_history_parse.match(file_name)
                 if match:
-                    raw_sn, raw_status, _, raw_time_str = match.groups()
+                    raw_sn, raw_status, raw_stage, raw_time_str = match.groups()
                     sn = raw_sn.upper()
                     status = raw_status.upper()
+                    if raw_stage.upper() == "OST":
+                        stage = "OST"
+                    else:
+                        stage = "test_history"
                 else:
-                    # Match flat structure: SN-time-STATUS.dcl
                     match_dcl = self.re_history_dcl_parse.match(file_name)
                     if not match_dcl: return None
                     raw_sn, raw_time_str, raw_status = match_dcl.groups()
                     sn = raw_sn.upper()
                     status = raw_status.upper()
 
+                    if "OST" in file_name.upper():
+                        stage = "OST"
+                    else:
+                        stage = "test_history"
+
             elif anchor_type == "result":
+                stage = "testresult"
+                status = "FAIL"
                 match = self.re_result_parse.match(file_name)
                 if not match: return None
                 raw_sn, raw_time_str = match.groups()
                 sn = raw_sn.upper()
-                status = "FAIL"
-
-            stage = "OST" if "OST" in file_name.upper() else "ICT"
 
             # ========================================================
-            # Timestamp Standardization
+            # Timestamp Standardization & Fallback
             # ========================================================
-            try:
-                if len(raw_time_str) >= 14:
-                    dt = datetime.strptime(raw_time_str[:14], '%Y%m%d%H%M%S')
-                    log_time = dt.strftime('%Y-%m-%d %H:%M:%S')
-                elif len(raw_time_str) == 8:
-                    dt = datetime.strptime(raw_time_str, '%Y%m%d')
-                    log_time = dt.strftime('%Y-%m-%d 00:00:00')
-                else:
-                    raise ValueError
-            except:
+            log_time = None
+            if raw_time_str:
+                try:
+                    if len(raw_time_str) >= 14:
+                        dt = datetime.strptime(raw_time_str[:14], '%Y%m%d%H%M%S')
+                        log_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    elif len(raw_time_str) == 8:
+                        dt = datetime.strptime(raw_time_str, '%Y%m%d')
+                        log_time = dt.strftime('%Y-%m-%d 00:00:00')
+                except ValueError:
+                    pass
+
+            if not log_time:
                 mtime_dt = datetime.fromtimestamp(f_stat.st_mtime)
                 log_time = mtime_dt.strftime('%Y-%m-%d %H:%M:%S')
 
-            # Fallback: If no standard PN layer exists, use parent folder name (e.g., JBW_MIDDLE_PLANE)
+            # Fallback: If no standard PN layer exists, use parent folder name
             if not pn:
                 p_parts = Path(entry.path).parts
                 for idx, part in enumerate(p_parts):
@@ -122,7 +129,7 @@ class IctLogAgent:
                 "relative_path": f"{self.root_name}/{rel_p}",
                 "share_name": self.root_name
             }
-        except:
+        except Exception:
             return None
 
     def start_scan(self, last_ts):
@@ -132,7 +139,6 @@ class IctLogAgent:
         yield from self._find_anchors_recursive(self.root_dir, last_ts)
 
     def _find_anchors_recursive(self, current_path, last_ts):
-        """ Recursively traverse down to find target anchor directories """
         try:
             with os.scandir(current_path) as it:
                 for entry in it:
@@ -143,16 +149,13 @@ class IctLogAgent:
                         dirname_lower = entry.name.lower()
                         if dirname_lower in ['testresult', 'test_history']:
                             anchor_type = "result" if dirname_lower == 'testresult' else "history"
-                            # Path A: Scan flat files directly under the anchor root folder
                             yield from self._collect_logs_direct_under_anchor(entry.path, last_ts, anchor_type)
-                            # Path B: Dig deeper into standard fixture/PN hierarchy
                             yield from self._scan_fixture_dir(entry.path, last_ts, anchor_type)
                         else:
                             yield from self._find_anchors_recursive(entry.path, last_ts)
         except Exception: pass
 
     def _collect_logs_direct_under_anchor(self, anchor_path, last_ts, anchor_type):
-        """ Scan flat logs directly located under the anchor folder """
         try:
             with os.scandir(anchor_path) as it:
                 for entry in it:
@@ -172,7 +175,6 @@ class IctLogAgent:
         except Exception: pass
 
     def _scan_fixture_dir(self, anchor_path, last_ts, anchor_type):
-        """ Match fixture layers: AAxxx or ABxxx """
         try:
             with os.scandir(anchor_path) as it:
                 for entry in it:
@@ -183,7 +185,6 @@ class IctLogAgent:
         except Exception: pass
 
     def _scan_pn_dir(self, fixture_path, fixture_no, last_ts, anchor_type):
-        """ Match 11-digit PN layers """
         try:
             with os.scandir(fixture_path) as it:
                 for entry in it:
@@ -195,7 +196,6 @@ class IctLogAgent:
         except Exception: pass
 
     def _collect_logs(self, pn_path, fixture_no, pn, last_ts, anchor_type):
-        """ Collect files from standard hierarchical folders """
         try:
             with os.scandir(pn_path) as it:
                 for entry in it:
@@ -267,14 +267,12 @@ class IctLogAgent:
                     if len(futures) >= 10:
                         time.sleep(0.2)
 
-                    # Uploading a full batch (1000 items)
                     f = self.executor.submit(self.post_data, list(batch), current_scan_id)
                     futures.add(f)
                     print(f"[{datetime.now()}] Batch dispatched. Total logs packed into queue: {scanned_count}")
                     batch = []
 
         if batch and self.running:
-            # Uploading the final remaining batch
             f = self.executor.submit(self.post_data, list(batch), current_scan_id)
             futures.add(f)
             print(f"[{datetime.now()}] Final batch dispatched. Total logs packed into queue: {scanned_count}")

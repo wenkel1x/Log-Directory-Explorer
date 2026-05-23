@@ -1,9 +1,17 @@
-from flask import Flask
+from flask import Flask,request, abort
 from flask_sqlalchemy import SQLAlchemy
 import urllib.parse
 
 # 全局唯一的 db 对象
 db = SQLAlchemy()
+
+def _security_gate():
+    # 如果请求路径是以 /api/ 开头的接口
+    if request.path.startswith('/api/'):
+        referer = request.headers.get('Referer')
+        if not referer or "10.94.99.153" not in referer:
+            print(f"[Security Block] Blocked unauthorized API access to {request.path} from {request.remote_addr}")
+            abort(403, description="Access denied: Requests must originate from the official portal UI.")
 
 def _configure_common(app):
     raw_password = "P@ssw0rd"
@@ -31,6 +39,7 @@ def create_portal_app():
     """前端展示服务"""
     app = Flask(__name__, template_folder='../templates', static_folder='../static')
     _configure_common(app)
+    app.before_request(_security_gate)
 
     with app.app_context():
         from .main import main_bp

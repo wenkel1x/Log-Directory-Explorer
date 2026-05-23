@@ -97,6 +97,12 @@ $(document).ready(function() {
             $('#searchForm')[0].reset();
             table.draw();
         });
+        $('#searchForm').find('input, select').on('keydown', function(e) {
+            if (e.which === 13) {
+                e.preventDefault(); // 阻止表单默认的提交刷新行为
+                table.draw();       // 触发 DataTable 重新加载
+            }
+        });
         if (sn || pn) {
             table.draw();
         }
