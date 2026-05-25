@@ -75,24 +75,25 @@ class LogAgent:
                 return False
             raw_patterns = [p.upper().split('/') for p in self.original_patterns]
             for pattern in raw_patterns:
-                idx = 0
-                match_count = 0
-                for part in rel_parts:
-                    target = pattern[idx]
-                    is_match = False
-                    if target == "PN":
-                        if self.re_pn_standard.match(part):
-                            is_match = True
-                    else:
-                        if target == part:
-                            is_match = True
-                    if is_match:
-                        match_count += 1
-                        idx += 1
-                        if match_count == len(pattern):
-                            return True
+                p_len = len(pattern)
+                if len(rel_parts) < p_len:
+                    continue
+                for i in range(len(rel_parts) - p_len + 1):
+                    sub_parts = rel_parts[i:i+p_len]
+                    match = True
+                    for idx, target in enumerate(pattern):
+                        if target == "PN":
+                            if not self.re_pn_standard.match(sub_parts[idx]):
+                                match = False
+                                break
+                        else:
+                            if target != sub_parts[idx]:
+                                match = False
+                                break
+                    if match:
+                        return True
             return False
-        except:
+        except Exception:
             return False
 
     def get_fast_time(self, entry_path, f_stat, mtime_dt):
@@ -187,10 +188,9 @@ class LogAgent:
                         if any(entry_name_lower.endswith(ext) for ext in self.ext_list):
                             f_stat = entry.stat()
                             if f_stat.st_mtime > last_ts:
-                                if self.validate_structural_path(current_path_parts):
-                                    yield entry, current_pn, f_stat, current_path_parts
-        except Exception:
-            pass
+                                yield entry, current_pn, f_stat
+        except Exception as e:
+            print(f"[{datetime.now()}] SCAN ERROR at {current_dir}: {e}")
 
     def post_data(self, items, scan_id):
         if not items: return True
