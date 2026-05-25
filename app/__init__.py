@@ -1,18 +1,29 @@
-from flask import Flask
+from flask import Flask,request, abort
 from flask_sqlalchemy import SQLAlchemy
 import urllib.parse
 
 # 全局唯一的 db 对象
 db = SQLAlchemy()
 
+def _security_gate():
+    # 如果请求路径是以 /api/ 开头的接口
+    if request.path.startswith('/api/'):
+        referer = request.headers.get('Referer')
+        if not referer or "10.94.99.153" not in referer:
+            print(f"[Security Block] Blocked unauthorized API access to {request.path} from {request.remote_addr}")
+            abort(403, description="Access denied: Requests must originate from the official portal UI.")
+
 def _configure_common(app):
-    """
-    内部私有函数：封装所有通用的基础配置
-    """
     raw_password = "P@ssw0rd"
     safe_password = urllib.parse.quote_plus(raw_password)
+
     app.config['SQLALCHEMY_DATABASE_URI'] = f'mysql+pymysql://root:{safe_password}@127.0.0.1:3306/log_system?charset=utf8mb4'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+    app.config['SQLALCHEMY_BINDS'] = {
+        'log_system': f'mysql+pymysql://root:{safe_password}@127.0.0.1:3306/log_system?charset=utf8mb4',
+        'ict_log_system': f'mysql+pymysql://root:{safe_password}@127.0.0.1:3306/ict_log_system?charset=utf8mb4'
+    }
 
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         "pool_size": 20,
@@ -22,17 +33,15 @@ def _configure_common(app):
         "pool_timeout": 30
     }
 
-    # 执行 db 初始化
     db.init_app(app)
 
 def create_portal_app():
     """前端展示服务"""
     app = Flask(__name__, template_folder='../templates', static_folder='../static')
-    # 继承通用配置
     _configure_common(app)
+    app.before_request(_security_gate)
 
     with app.app_context():
-        # 只导入和注册前端查询相关的蓝图
         from .main import main_bp
         from .routes.search import search_bp
         from .routes.tree import tree_bp
@@ -45,8 +54,6 @@ def create_portal_app():
 def create_ingestion_app():
     """后端上报服务"""
     app = Flask(__name__)
-
-    # 继承通用配置
     _configure_common(app)
 
     with app.app_context():

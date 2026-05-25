@@ -11,7 +11,7 @@
     <link href="{{ url_for('static', filename='css/bootstrap-icons.min.css') }}" rel="stylesheet" >
     
     <style>
-        /* 1. 基础布局：恢复你原来的自然滚动感 */
+        /* 1. 基础布局：恢复自然滚动感 */
         html, body {
             margin: 0;
             background-color: #f8fafc;
@@ -33,7 +33,7 @@
             padding: 30px 20px;
         }
 
-        /* 2. 项目卡片样式 (保持你原来的设计) */
+        /* 2. 项目卡片样式 */
         .project-card {
             background: #ffffff;
             border: 1px solid #e2e8f0;
@@ -70,25 +70,25 @@
             margin-bottom: 0;
         }
 
-        /* 3. 核心布局修改：只针对监控区域盒子 */
+        /* 3. 监控区域容器与滚动条美化 */
         .activity-section {
             background: #ffffff;
             border: 1px solid #e2e8f0;
             border-radius: 12px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
             margin-top: 30px;
-            overflow: hidden; /* 保证圆角不被内部内容撑破 */
+            overflow: hidden;
         }
 
-        /* 让这个内部容器具备滚动条 */
         .activity-section .table-responsive {
-            max-height: 250px; /* 超出此高度则内部滚动 */
+            max-height: 250px; 
             overflow-y: auto;
-            scrollbar-width: thin; /* Firefox 细滚动条 */
+            scrollbar-width: thin;
             scrollbar-color: #dee2e6 transparent;
+            position: relative;
+            min-height: 100px; /* 预留加载动画高度 */
         }
 
-        /* 美化滚动条 (Chrome, Edge, Safari) */
         .activity-section .table-responsive::-webkit-scrollbar {
             width: 6px;
         }
@@ -97,7 +97,7 @@
             border-radius: 10px;
         }
 
-        /* 固定表头：滚动时标题不动 */
+        /* 固定表头 */
         .activity-section .table thead {
             position: sticky;
             top: 0;
@@ -107,7 +107,7 @@
         .activity-section .table thead th {
             background-color: #f8fafc !important;
             border-bottom: 1px solid #e2e8f0;
-            box-shadow: inset 0 -1px 0 #dee2e6; /* 强化底边线 */
+            box-shadow: inset 0 -1px 0 #dee2e6;
         }
 
         .table thead th {
@@ -116,7 +116,7 @@
             padding: 12px 15px;
         }
 
-        /* 4. 页脚样式 */
+        /* 页脚与按钮扩展 */
         .footer {
             background-color: #ffffff;
             border-top: 1px solid #e2e8f0;
@@ -129,6 +129,15 @@
             font-size: 0.85rem;
             font-weight: 600;
             border-radius: 8px;
+        }
+
+        /* 异步加载遮罩层 */
+        .loading-overlay {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            color: #3b82f6;
         }
     </style>
 </head>
@@ -145,11 +154,13 @@
 
 <div class="main-container">
     <div class="projects-grid">
-        <div class="row g-3"> {% for p in projects %}
-            <div class="col-md-6 col-lg-4"> <div class="project-card">
+        <div class="row g-3">
+            {% for p in projects %}
+            <div class="col-md-6 col-lg-4">
+                <div class="project-card">
                     <div class="d-flex align-items-center mb-3">
-                        <div class="icon-box bg-{{ p.color }} bg-opacity-10 text-{{ p.color }}">
-                            <i class="bi {{ p.icon }}"></i>
+                        <div class="icon-box bg-{{ p.color if p.color else 'primary' }} bg-opacity-10 text-{{ p.color if p.color else 'primary' }}">
+                            <i class="bi {{ p.icon if p.icon else 'bi-folder' }}"></i>
                         </div>
                         <div class="flex-grow-1">
                             <div class="d-flex justify-content-between align-items-center">
@@ -166,10 +177,10 @@
                     <div class="row g-2">
                         {% if p.status == 'Active' %}
                         <div class="col-6">
-                            <a href="{{ url_for(p.tree_url) if p.tree_url else '#' }}" class="btn btn-primary btn-sm-custom w-100">Log Explorer</a>
+                            <a href="{{ p.tree_url or '#' }}" class="btn btn-primary btn-sm-custom w-100">Log Explorer</a>
                         </div>
                         <div class="col-6">
-                            <a href="{{ url_for(p.search_url) if p.search_url else '#' }}" class="btn btn-outline-primary btn-sm-custom w-100">Advance Search</a>
+                            <a href="{{ p.search_url or '#' }}" class="btn btn-outline-primary btn-sm-custom w-100">Advance Search</a>
                         </div>
                         {% else %}
                         <div class="col-12">
@@ -190,7 +201,12 @@
         </div>
 
         <div class="table-responsive">
-            <table class="table table-hover align-middle">
+            <div id="table-loader" class="loading-overlay">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                <span class="small fw-semibold">Loading Ingestion Data...</span>
+            </div>
+
+            <table class="table table-hover align-middle d-none" id="stats-table">
                 <thead class="table-light">
                     <tr style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
                         <th class="ps-4">Node</th>
@@ -201,57 +217,8 @@
                         <th class="text-end pe-4">Last Update</th>
                     </tr>
                 </thead>
-                <tbody style="font-size: 0.8rem;">
-                    {% for s in stats %}
-                    <tr>
-                        <td class="ps-4">
-                            <div class="fw-bold text-dark">{{ s.server }}</div>
-                        </td>
-
-                        <td class="text-center">
-                            {% set stage_list = s.stage.split('|') %}
-                            {% for st in stage_list %}
-                                {% set st = st.strip() %}
-                                <span class="badge border me-1
-                                    {% if st == 'BFT' %}bg-info-subtle text-info
-                                    {% elif st == 'FQA' %}bg-warning-subtle text-warning
-                                    {% else %}bg-secondary-subtle text-secondary{% endif %}"
-                                    style="font-size: 0.7rem;">
-                                    {{ st }}
-                                </span>
-                            {% endfor %}
-                        </td>
-                        <td class="text-center text-muted">
-                            <div>{{ "{:,}".format(s.yesterday_count) }}</div>
-                            <div style="font-size: 0.65rem; opacity: 0.8;">
-                                {% for stg, count in s.details.yesterday.items() %}
-                                    {{ stg }}:{{ count }}{% if not loop.last %} | {% endif %}
-                                {% endfor %}
-                            </div>
-                        </td>
-
-                        <td class="text-center text-primary fw-bold">
-                            <div>{{ "{:,}".format(s.today_count) }}</div>
-                            <div class="text-muted fw-normal" style="font-size: 0.65rem; margin-top: -2px;">
-                                {% for stg, count in s.details.today.items() %}
-                                    {{ stg }}:{{ count }}{% if not loop.last %} | {% endif %}
-                                {% endfor %}
-                            </div>
-                        </td>
-
-                        <td class="text-center">
-                            <span class="text-success fw-bold" style="font-size: 0.7rem;">
-                                <span class="spinner-grow spinner-grow-sm me-1" style="width: 6px; height: 6px;"></span>
-                                LIVE
-                            </span>
-                        </td>
-
-                        <td class="text-end pe-4 text-muted font-monospace">
-                            {{ s.last_time }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
+                <tbody style="font-size: 0.8rem;" id="stats-table-body">
+                    </tbody>
             </table>
         </div>
     </div>
@@ -259,10 +226,13 @@
 
 <footer class="footer">
     <div class="container text-center small text-secondary">
-        &copy; 2026 Log Analysis Portal System Version 0.1 |
+        &copy; 2026 Log Analysis Portal System Version 0.5 |
         Technical Support: <a href="mailto:Wenkex.Li@quantacn.com" class="text-decoration-none fw-bold">Wenkex.Li@quantacn.com</a>
     </div>
 </footer>
+
+<script src="{{ url_for('static', filename='js/jquery-3.7.0.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 
 </body>
 </html>

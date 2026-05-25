@@ -3,6 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <title>Log Structure Explorer</title>
+    <script>
+        (function() {
+            var key = new URLSearchParams(window.location.search).get('project_key') || "";
+            window.CURRENT_PROJECT_KEY = key;
+            Object.defineProperty(window, 'CURRENT_PROJECT_KEY', {
+                value: key,
+                writable: true,
+                configurable: true
+            });
+        })();
+    </script>
+
     <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
@@ -21,7 +33,7 @@
 <nav class="navbar navbar-dark bg-dark shadow-sm mb-4">
     <div class="container-fluid">
         <span class="navbar-brand fw-bold" style="cursor: pointer;" onclick="location.href='{{ url_for('main_bp.index') }}';">📂 Log Directory Explorer</span>
-        <a href="{{ url_for('search_bp.index') }}" class="btn btn-link text-decoration-none text-info"> <i class="bi bi-arrow-left"></i> Go Advanced Search</a>
+        <a href="{{ url_for('search_bp.index') }}?project_key={{ request.args.get('project_key', '') }}" class="btn btn-link text-decoration-none text-info"> <i class="bi bi-arrow-left"></i> Go Advanced Search</a>
     </div>
 </nav>
 
@@ -68,7 +80,6 @@
             <div class="modal-header bg-dark text-white py-2">
                 <h6 class="modal-title" id="previewTitle">Log Viewer</h6>
                 <div class="ms-auto">
-                    <!-- <button class="btn btn-sm btn-outline-light me-2" onclick="copyLogContent()">Copy</button> -->
                     <button class="btn btn-sm btn-info" onclick="saveLogFromMemory()">Save to PC</button>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
@@ -84,6 +95,7 @@
 <script src="{{ url_for('static', filename='js/jquery.dataTables.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dataTables.bootstrap5.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app_core.js') }}"></script>
 <script src="{{ url_for('static', filename='js/tree.js') }}"></script>
 </body>
 </html>

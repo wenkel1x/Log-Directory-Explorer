@@ -18,6 +18,7 @@ class LogAgent:
         self.server_name = args.name.lower() if args.name else socket.gethostname().lower()
         self.mode = args.mode  
         self.ext_list = [e.lower() for e in args.ext.split(',')]
+        self.project_key = args.project_key.strip().lower()
 
         self.api_base = "http://10.94.99.153/svc"
         self.upload_url = f"{self.api_base}/upload_batch"
@@ -74,33 +75,28 @@ class LogAgent:
                 return False
             raw_patterns = [p.upper().split('/') for p in self.original_patterns]
             for pattern in raw_patterns:
-                idx = 0
-                match_count = 0
-                for part in rel_parts:
-                    target = pattern[idx]
-                    is_match = False
-                    if target == "PN":
-                        if self.re_pn_standard.match(part):
-                            is_match = True
-                    else:
-                        if target == part:
-                            is_match = True
-                    if is_match:
-                        match_count += 1
-                        idx += 1
-                        if match_count == len(pattern):
-                            return True
+                p_len = len(pattern)
+                if len(rel_parts) < p_len:
+                    continue
+                for i in range(len(rel_parts) - p_len + 1):
+                    sub_parts = rel_parts[i:i+p_len]
+                    match = True
+                    for idx, target in enumerate(pattern):
+                        if target == "PN":
+                            if not self.re_pn_standard.match(sub_parts[idx]):
+                                match = False
+                                break
+                        else:
+                            if target != sub_parts[idx]:
+                                match = False
+                                break
+                    if match:
+                        return True
             return False
-        except:
+        except Exception:
             return False
 
     def get_fast_time(self, entry_path, f_stat, mtime_dt):
-        # file_name = os.path.basename(entry_path)
-        # match = self.re_year.search(file_name)
-        # if match:
-        #     year = match.group(1)
-        #     return f"{year}{mtime_dt.strftime('-%m-%d %H:%M:%S')}"
-        # 2. 如果文件名没年份，看 ctime (状态改变时间) 是否合法
         try:
             ctime_dt = datetime.fromtimestamp(f_stat.st_ctime)
             if 2010 <= ctime_dt.year <= self.current_year:
@@ -155,34 +151,46 @@ class LogAgent:
             }
         except: return None
 
-    def fast_scan(self, current_dir, last_ts, current_pn="UNKNOWN", depth=0):
-        if not self.running: return
+    def fast_scan(self, current_dir, last_ts, current_pn="UNKNOWN", depth=0, current_path_parts=None):
+        if not self.running:
+            return
+        if current_path_parts is None:
+            current_path_parts = []
         try:
             with os.scandir(current_dir) as it:
                 for entry in it:
+                    if not self.running:
+                        break
+                    entry_name_lower = entry.name.lower()
+                    if entry_name_lower in self.block_list:
+                        continue
                     if entry.is_dir(follow_symlinks=False):
-                        if entry.is_symlink(): continue
-                        if entry.name.lower() in self.block_list: continue
+                        if entry.is_symlink():
+                            continue
                         dirname_upper = entry.name.upper()
-
+                        next_path_parts = current_path_parts + [dirname_upper]
                         if depth == 0:
                             is_pn = ("PN" in self.first_level_allowed and bool(self.re_pn_standard.match(dirname_upper)))
                             is_keyword = dirname_upper in self.first_level_allowed and dirname_upper != "PN"
-                            if not (is_pn or is_keyword): continue
+                            if not (is_pn or is_keyword):
+                                continue
                             next_pn = dirname_upper if is_pn else "UNKNOWN"
                         else:
-                            next_pn = current_pn
                             if os.path.basename(current_dir).upper() in self.pn_parents:
                                 next_pn = dirname_upper
                             elif self.re_pn_standard.match(dirname_upper):
                                 next_pn = dirname_upper
-                        yield from self.fast_scan(entry.path, last_ts, next_pn, depth + 1)
+                            else:
+                                next_pn = current_pn
+
+                        yield from self.fast_scan(entry.path, last_ts, next_pn, depth + 1, next_path_parts)
                     elif entry.is_file():
-                        if any(entry.name.lower().endswith(ext) for ext in self.ext_list):
+                        if any(entry_name_lower.endswith(ext) for ext in self.ext_list):
                             f_stat = entry.stat()
                             if f_stat.st_mtime > last_ts:
                                 yield entry, current_pn, f_stat
-        except: pass
+        except Exception as e:
+            print(f"[{datetime.now()}] SCAN ERROR at {current_dir}: {e}")
 
     def post_data(self, items, scan_id):
         if not items: return True
@@ -190,7 +198,12 @@ class LogAgent:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                data = json.dumps({"items": items, "scan_id": scan_id}).encode('utf-8')
+                payload = {
+                    "project_key": self.project_key,
+                    "items": items,
+                    "scan_id": scan_id
+                }
+                data = json.dumps(payload).encode('utf-8')
                 req = urllib.request.Request(
                     self.upload_url,
                     data=data,
@@ -209,14 +222,20 @@ class LogAgent:
         return False
 
     def report_self(self):
-        """上报自身 IP 及状态"""
-        payload = {"server_name": self.server_name, "ip": ""}
+        payload = {
+            "project_key": self.project_key,
+            "server_name": self.server_name,
+            "ip": ""
+        }
         try:
             json_data = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(self.report_url, data=json_data, headers={'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, timeout=10) as response:
-                pass
-        except: pass
+                resp_data = json.loads(response.read().decode('utf-8'))
+                print(f"[{datetime.now()}] IP Reported Successfully to [{resp_data.get('project')}].")
+        except Exception as e:
+            print(f"[{datetime.now()}] WARNING: IP Report failed: {e}")
+
     def run(self):
         self.report_self()
         current_scan_id = int(time.time())
@@ -299,6 +318,7 @@ class LogAgent:
             print(f"[{datetime.now()}] All batches OK. Triggering cleanup...")
             try:
                 cleanup_payload = {
+                    "project_key": self.project_key,
                     "server_name": self.server_name,
                     "share_name": self.root_name,
                     "scan_id": current_scan_id
@@ -333,5 +353,6 @@ if __name__ == "__main__":
     parser.add_argument("--name")
     parser.add_argument("--mode", choices=['full', 'incr'], default='incr')
     parser.add_argument("--ext", default=".log,.txt")
+    parser.add_argument('--project_key', type=str, default='log_system', help="Target project database: log_system (BFT) or ict_log_system (ICT)")
     args = parser.parse_args()
     LogAgent(args).run()

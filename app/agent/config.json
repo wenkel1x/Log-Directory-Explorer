@@ -15,5 +15,5 @@
     "pn_parent_folders": ["SIMPLE_FIXTURE"],
     "valid_stages": ["BFT", "FQA", "SIMPLE_FIXTURE","FAT"],
     "valid_status": ["PASS", "FAIL", "ABORT"],
-    "block_list": ["backup", "tmp", "routing", "temp", "bak", "process","sel"]
+    "block_list": ["backup", "tmp", "routing", "temp", "bak", "process","sel",".trash-0",".trash-1000","$RECYCLE.BIN","System Volume Information"]
 }

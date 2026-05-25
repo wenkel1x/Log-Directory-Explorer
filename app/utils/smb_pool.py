@@ -4,51 +4,61 @@ import threading
 from smbclient import register_session, open_file, delete_session
 from smbprotocol.exceptions import SMBException
 
+SMB_CREDENTIALS = {
+    "log_system": {
+        "username": "test",
+        "password": "qcitest"
+    },
+    "ict_log_system": {
+        "username": "test",
+        "password": "Cc_ictser"
+    }
+}
+
 class SMBSessionPool:
-    def __init__(self, username, password):
-        self.username = username
-        self.password = password
+    def __init__(self):
         self.active_sessions = set()
         self.lock = threading.Lock()
 
-    def _init_session(self, ip):
+    def _init_session(self, ip, project_key):
         with self.lock:
             if ip in self.active_sessions:
                 return True
+            # 获取当前项目对应的凭据，找不到则用 log_system 兜底
+            cred = SMB_CREDENTIALS.get(project_key, SMB_CREDENTIALS["log_system"])
+            username = cred["username"]
+            password = cred["password"]
+            
             try:
                 try:
                     delete_session(ip)
                 except Exception:
                     pass
-                register_session(ip, username=self.username, password=self.password)
+                register_session(ip, username=username, password=password)
                 self.active_sessions.add(ip)
                 return True
             except Exception as e:
-                logging.error(f"[SMB Pool] IP [{ip}] connect fail: {str(e)}")
+                logging.error(f"[SMB Pool] Project [{project_key}] IP [{ip}] connect fail: {str(e)}")
                 return False
 
-    def read_file(self, ip, smb_remote_path):
+    def read_file(self, ip, smb_remote_path, project_key):
         if ip not in self.active_sessions:
-            if not self._init_session(ip):
-                raise SMBException(f"Unable to connect to SMB server: {ip}")
+            if not self._init_session(ip, project_key):
+                raise SMBException(f"Unable to connect to SMB server: {ip} with project: {project_key}")
         try:
             with open_file(smb_remote_path, mode="rb") as remote_f:
                 return remote_f.read()
         except SMBException as e:
-            logging.warning(f"[SMB Pool] Session for IP [{ip}] expired, attempting to reconnect. Reason: {str(e)}")
+            logging.warning(f"[SMB Pool] Session for IP [{ip}] expired, reconnecting. Reason: {str(e)}")
             with self.lock:
                 self.active_sessions.discard(ip)
-            if self._init_session(ip):
+            if self._init_session(ip, project_key):
                 with open_file(smb_remote_path, mode="rb") as remote_f:
                     return remote_f.read()
             else:
                 raise SMBException(f"SMB server [{ip}] disconnected and reconnection failed")
 
-    def get_local_cache(self, server_name, rel_path, ip, cache_dir):
-        """
-        高层复用函数：确保远程文件安全下载到本地缓存中
-        返回: (local_file_path, clean_filename)
-        """
+    def get_local_cache(self, server_name, rel_path, ip, cache_dir, project_key='log_system'):
         clean_rel_path = rel_path.replace('\\', '/').lstrip('/')
         safe_path = clean_rel_path.replace('/', '_')
         local_file = os.path.join(cache_dir, f"{server_name}_{safe_path}")
@@ -57,8 +67,10 @@ class SMBSessionPool:
         if not os.path.exists(local_file):
             win_style_path = clean_rel_path.replace('/', '\\')
             smb_remote_path = f"\\\\{ip}\\{win_style_path}"
-            content_bytes = self.read_file(ip, smb_remote_path)
+
+            content_bytes = self.read_file(ip, smb_remote_path, project_key)
             with open(local_file, mode="wb") as local_f:
                 local_f.write(content_bytes)
         return local_file, clean_filename
-smb_pool = SMBSessionPool(username="test", password="qcitest")
+
+smb_pool = SMBSessionPool()
