@@ -144,7 +144,7 @@ def logs_server_side():
     except Exception as e:
         return jsonify({"draw": draw, "error": str(e), "data": []})
 
-@search_bp.route('/download/<server_name>/<path:rel_path>')
+@search_bp.route('/api/download/<server_name>/<path:rel_path>')
 def download_log(server_name, rel_path):
     project_key = request.args.get('project_key')
     get_tenant_engine(project_key)

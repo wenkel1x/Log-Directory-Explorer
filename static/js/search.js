@@ -8,7 +8,6 @@ $(document).ready(function() {
     if (pn) $('#s_pn').val(pn);
 
     // 2. 先请求年份和服务器数据，全部完成后再初始化 DataTable
-    // 使用 Promise.all 保证所有下拉框都渲染完毕
     const loadYears = $.get('/api/get_years', { project_key: CURRENT_PROJECT_KEY });
     const loadServers = $.get('/api/get_servers', { project_key: CURRENT_PROJECT_KEY });
 
@@ -79,7 +78,7 @@ $(document).ready(function() {
                                 <button class="btn btn-sm btn-outline-primary" onclick="openPreview('${row.server}', '${row.path}')">
                                     <i class="bi bi-eye"></i> View
                                 </button>
-                                <a href="/download/${row.server}/${row.path}?project_key=${CURRENT_PROJECT_KEY}" class="btn btn-sm btn-outline-success">
+                                <a href="/api/download/${row.server}/${row.path}?project_key=${CURRENT_PROJECT_KEY}" class="btn btn-sm btn-outline-success">
                                     <i class="bi bi-download"></i>
                                 </a>
                             </div>
@@ -91,7 +90,7 @@ $(document).ready(function() {
             order: [[0, 'desc']]
         });
 
-        // 绑定搜索和重置按钮（因为 table 变量在作用域内，可以直接用）
+        // 绑定搜索和重置按钮
         $('#btn_search').off('click').on('click', () => table.draw());
         $('#btn_reset').off('click').on('click', () => {
             $('#searchForm')[0].reset();

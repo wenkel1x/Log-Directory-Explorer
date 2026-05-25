@@ -3,7 +3,7 @@ $(document).ready(function() {
 
     // --- 树形菜单初始化 ---
     window.loadInitialTree = function() {
-        // 加载基础树：带上多租户钥匙，让后端只返回当前业务线的服务器资产
+        // 加载基础树
         $.get('/api/get_tree_base', { project_key: CURRENT_PROJECT_KEY }, function(data) {
             let html = '';
             for (let server in data) {
@@ -43,7 +43,7 @@ $(document).ready(function() {
         $(`#icon_${srv}_${shr}`).toggleClass('rotate-90');
         toggleBsCollapse(id);
         if ($(`#${id}`).html().trim() === "") {
-            // 加载 PN 列表：带上多租户钥匙
+            // 加载 PN 列表
             $.get('/api/get_pns', { server: srv, share: shr, project_key: CURRENT_PROJECT_KEY }, function(pns) {
                 $(`#${id}`).html(pns.map(pnObj => {
                     const pnName = pnObj.name; 
@@ -52,7 +52,7 @@ $(document).ready(function() {
                     const clickAction = hasData ? `onclick="loadMonths('${srv}', '${shr}', '${pnName}')"` : '';
                     const iconClass = hasData ? '' : 'd-none'; 
                     const statusIcon = hasData ? '' : '<i class="bi bi-hand-index-thumb text-muted opacity-50" style="font-size: 1rem; transform: rotate(90deg); display: inline-block; vertical-align: middle; margin-left: 8px;" title="No data"></i>';
-                    // 跳转高级搜索：把 `/bft/search` 统一改为 `/search`，并带上当前 project_key 令牌
+                    // 跳转高级搜索
                     const tracePnUrl = `/search?s_pn=${encodeURIComponent(pnName)}&project_key=${CURRENT_PROJECT_KEY}`;
 
                     return `
@@ -79,7 +79,7 @@ $(document).ready(function() {
         $(`#icon_${srv}_${shr}_${pn}`).toggleClass('rotate-90');
         toggleBsCollapse(id);
         if ($(`#${id}`).html().trim() === "") {
-            //加载月份：带上多租户钥匙，保障表映射安全
+            //加载月份
             $.get('/api/get_months', { pn: pn, project_key: CURRENT_PROJECT_KEY }, function(mons) {
                 $(`#${id}`).html(mons.map(mon => `
                     <div class="tree-node py-1">
@@ -96,7 +96,7 @@ $(document).ready(function() {
         if (el) bootstrap.Collapse.getOrCreateInstance(el).toggle();
     }
 
-    // ---  DataTables 加载日志列表 (核心预览触发) ---
+    // ---  DataTables 加载日志列表 ---
     window.loadMonthLogs = function(pn, month) {
         const year = new Date().getFullYear();
         $('#tableTitle').html(`<i class="bi bi-calendar-check me-2"></i> ${pn} [${year}-${month}]`);
@@ -108,7 +108,7 @@ $(document).ready(function() {
         snDataTable = $('#snTable').DataTable({
             ajax: {
                 url: `/api/get_month_logs`,
-                // DataTable 获取日志明细：必须将 project_key 传给后端
+                // DataTable 获取日志明细
                 data: { pn: pn, month: month, year: year, project_key: CURRENT_PROJECT_KEY },
                 dataSrc: 'data'
             },
@@ -146,10 +146,10 @@ $(document).ready(function() {
                     data: null,
                     orderable: false,
                     render: function(data, type, row) {
-                        //跳转高级搜索：将 `/bft/search` 规范为 `/search`，且追加隔离钥匙
+                        //跳转高级搜索
                         const searchUrl = `/search?s_sn=${encodeURIComponent(row.sn)}&s_pn=${encodeURIComponent(pn)}&project_key=${CURRENT_PROJECT_KEY}`;
 
-                        // 下载链接：也需要动态挂载 `?project_key=`
+                        // 下载链接
                         const downloadUrl = `${row.download_url}?project_key=${CURRENT_PROJECT_KEY}`;
 
                         return `
@@ -176,7 +176,7 @@ $(document).ready(function() {
         $('#previewContent').text('Loading from Memory...');
         $('#previewModal').modal('show');
 
-        //预览日志接口：追加隔离令牌
+        //预览日志接口
         $.get('/api/preview_log', { server: server, path: path, project_key: CURRENT_PROJECT_KEY }, function(data) {
             if (data.content) {
                 $('#previewTitle').text("Preview: " + data.filename);
@@ -231,7 +231,7 @@ $(document).ready(function() {
         const originalHtml = btn.html();
         btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> 打包中...');
 
-        //批量下载接口：在 POST 的 JSON Payload 中注入 project_key 令牌
+        //批量下载接口
         fetch('/api/batch_download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

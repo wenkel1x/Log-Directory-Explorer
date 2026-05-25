@@ -35,7 +35,7 @@ class LogAgent:
         self.running = True
         self.executor = ThreadPoolExecutor(max_workers=2)
         self.root_name = os.path.basename(self.root_dir.rstrip(os.sep))
-        #self.re_year = (r'(?:[_/-])(20\d{2})(?:[_/-]|$)')
+        self.re_pure_date = re.compile(r'20\d{4,12}')
         self.re_stem_split = re.compile(r'[_.-]')
 
         self.current_year = datetime.now().year
@@ -109,23 +109,35 @@ class LogAgent:
             file_name = entry.name
             dot_idx = file_name.rfind('.')
             stem = file_name[:dot_idx] if dot_idx != -1 else file_name
-            name_parts = self.re_stem_split.split(stem)
-            if len(name_parts) <= 1 or not any(p.isdigit() and len(p) >= 4 for p in name_parts[1:]):
-                return None
-            mtime_dt = datetime.fromtimestamp(f_stat.st_mtime)
-            if 2010 <= mtime_dt.year <= self.current_year:
-                log_time = mtime_dt.strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                log_time = self.get_fast_time(entry.path, f_stat, mtime_dt)
+            log_time = None
+            parts = self.re_stem_split.split(stem)
+            sn = parts[0].upper()
+            remaining_part = "".join(parts[1:])
+            clean_digits = ''.join(c for c in remaining_part if c.isdigit())
+            match = self.re_pure_date.search(clean_digits)
+            if match:
+                ts = match.group(0)
+                ts_14 = ts.ljust(14, '0')
+                try:
+                    dt = datetime.strptime(ts_14, "%Y%m%d%H%M%S")
+                    if 2010 <= dt.year <= self.current_year:
+                        log_time = dt.strftime('%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    pass
+            if not log_time:
+                mtime_dt = datetime.fromtimestamp(f_stat.st_mtime)
+                if 2010 <= mtime_dt.year <= self.current_year:
+                    log_time = mtime_dt.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    log_time = self.get_fast_time(entry.path, f_stat, mtime_dt)
 
             path_str_upper = entry.path.upper().replace('\\', '/')
-            sn = self.re_stem_split.split(stem)[0].upper()
-
             rel_p = entry.path[len(self.root_dir):].replace('\\', '/').lstrip('/')
 
             # 判定 stage
             stage = "BFT"
-            path_parts = set(path_str_upper.replace('\\', '/').replace('_', '/').split('/'))
+            path_parts = set(path_str_upper.replace('\\', '/').split('/'))
+            path_parts.update(path_str_upper.replace('\\', '/').replace('_', '/').split('/'))
             for s in self.valid_stages:
                 if s in path_parts:
                     stage = s
