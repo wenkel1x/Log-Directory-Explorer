@@ -3,8 +3,17 @@ import json
 import redis
 import time
 import threading
+import logging
+import re
 from sqlalchemy import text
 from app import create_ingestion_app, db
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 PROJECT_MAP = {
     'log_system': 'log_system',
@@ -12,11 +21,67 @@ PROJECT_MAP = {
 }
 
 flask_app = create_ingestion_app()
-redis_client = redis.Redis(host='127.0.0.1', port=6379, db=0)
+
+# Redis连接延迟初始化
+_redis_client = None
+
+def get_redis_client():
+    """获取Redis客户端延迟初始化"""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            _redis_client = redis.Redis(
+                host='127.0.0.1',
+                port=6379,
+                db=0,
+                socket_connect_timeout=5,
+                socket_keepalive=True,
+                decode_responses=False,
+                max_connections=10
+            )
+            # 测试连接
+            _redis_client.ping()
+            logger.info("Redis connection established successfully")
+        except Exception as e:
+            logger.error(f"Failed to connect to Redis: {e}")
+            raise
+    return _redis_client
 
 GLOBAL_PAUSE_KEY = "log_system_pause"
 LOCAL_TABLE_CACHE = set()
 cache_lock = threading.Lock()
+
+# 表名验证正则
+TABLE_NAME_PATTERN = re.compile(r'^log_index_\d{4}$')
+
+def validate_table_name(t_name):
+    """验证表名格式防止SQL注入"""
+    if not TABLE_NAME_PATTERN.match(t_name):
+        raise ValueError(f"Invalid table name format: {t_name}")
+    return t_name
+
+def extract_year(log_time):
+    """
+    从日志时间中提取年份支持多种格式
+    允许的格式: YYYY-* 或 YYYY*
+    """
+    try:
+        if isinstance(log_time, str) and len(log_time) >= 4:
+            # 提取前4个字符
+            year_str = log_time[:4]
+            # 验证是否为4位数字
+            if year_str.isdigit():
+                year = int(year_str)
+                # 验证年份在合理范围内
+                if 1900 <= year <= 2100:
+                    return year_str
+            else:
+                logger.warning(f"Invalid year format in log_time: {log_time}, using default '0000'")
+                return "0000"
+    except Exception as e:
+        logger.warning(f"Error extracting year from log_time '{log_time}': {e}")
+
+    return "0000"
 
 def handle_cleanup_task(task_data):
     s_name = task_data.get('server_name')
@@ -24,11 +89,16 @@ def handle_cleanup_task(task_data):
     s_id = task_data.get('scan_id')
 
     project_key = task_data.get('project_key', 'log_system').strip().lower()
-    if project_key not in PROJECT_MAP: project_key = 'log_system'
+    if project_key not in PROJECT_MAP:
+        project_key = 'log_system'
     actual_bind_key = PROJECT_MAP[project_key]
 
     db_engine = db.engines[actual_bind_key]
-    print(f"DEBUG: Starting cleanup for DB Bind: [{actual_bind_key}]")
+    logger.info(f"Starting cleanup for DB Bind: [{actual_bind_key}], Server: [{s_name}], Share: [{sh_name}], ScanID: {s_id}")
+    # 参数验证
+    if not all([s_name, sh_name, s_id]):
+        logger.error(f"Invalid cleanup task parameters: {task_data}")
+        return
     try:
         all_tables = []
         with db_engine.begin() as conn:
@@ -39,6 +109,12 @@ def handle_cleanup_task(task_data):
 
         total_deleted = 0
         for table_name in all_tables:
+            try:
+                validate_table_name(table_name)
+            except ValueError as e:
+                logger.warning(f"[{actual_bind_key}] Skipping invalid table: {e}")
+                continue
+
             while True:
                 with db_engine.begin() as conn:
                     del_sql = text(f"""
@@ -49,16 +125,20 @@ def handle_cleanup_task(task_data):
                     res = conn.execute(del_sql, {"s_name": s_name, "sh_name": sh_name, "s_id": s_id})
                     count = res.rowcount
                     total_deleted += count
-                if count < 5000: break
+                if count < 5000:
+                    break
                 time.sleep(0.01)
-        print(f"[{actual_bind_key} CLEANUP] Log indices cleaned. Total deleted: {total_deleted}")
-        print(f"DEBUG: Extracting alive PNs with their respective years...")
+
+        logger.info(f"[{actual_bind_key} CLEANUP] Log indices cleaned. Total deleted: {total_deleted}")
+        logger.debug(f"[{actual_bind_key}] Extracting alive PNs with their respective years...")
         alive_pn_years = set()
 
         for table_name in all_tables:
             try:
                 table_year = int(table_name.replace('log_index_', ''))
+                validate_table_name(table_name)
             except ValueError:
+                logger.warning(f"[{actual_bind_key}] Invalid table name: {table_name}")
                 continue
             with db_engine.begin() as conn:
                 pn_sql = text(f"SELECT DISTINCT pn FROM `{table_name}` WHERE server_name = :s_name AND share_name = :sh_name")
@@ -78,24 +158,27 @@ def handle_cleanup_task(task_data):
             for t_id, t_year, t_pn in tree_rows:
                 if (t_year, t_pn) not in alive_pn_years:
                     ids_to_delete.append(t_id)
+
+            tree_deleted_count = 0
             if ids_to_delete:
-                delete_tree_sql = text("DELETE FROM `log_tree_data` WHERE id IN :ids")
-                tree_res = conn.execute(delete_tree_sql, {"ids": ids_to_delete})
-                tree_deleted_count = tree_res.rowcount
-            else:
-                tree_deleted_count = 0
-        print(f"[{actual_bind_key} TREE CLEANUP] FINISH. Removed {tree_deleted_count} stale PN rows from log_tree_data.")
+                for i in range(0, len(ids_to_delete), 1000):
+                    chunk = ids_to_delete[i:i+1000]
+                    conn.execute(text("DELETE FROM `log_tree_data` WHERE id IN :ids"), {"ids": tuple(chunk)})
+        logger.info(f"[{actual_bind_key} TREE CLEANUP] FINISH. Removed {tree_deleted_count} stale PN rows from log_tree_data.")
     except Exception as e:
-        print(f"Cleanup Error on [{actual_bind_key}]: {e}")
+        logger.error(f"Cleanup Error on [{actual_bind_key}]: {e}", exc_info=True)
 
 def process_batch_insert(data):
     global LOCAL_TABLE_CACHE
     items_list = data.get('items', [])
     scan_id = data.get('scan_id', 0)
-    if not items_list: return
+    if not items_list:
+        logger.debug("Empty items list received")
+        return
 
     project_key = data.get('project_key', 'log_system').strip().lower()
-    if project_key not in PROJECT_MAP: project_key = 'log_system'
+    if project_key not in PROJECT_MAP:
+        project_key = 'log_system'
 
     actual_bind_key = PROJECT_MAP[project_key]
     db_engine = db.engines[actual_bind_key]
@@ -105,27 +188,43 @@ def process_batch_insert(data):
 
     for item in items_list:
         log_time = item.get('log_time', '')
-        year = log_time[:4] if len(log_time) >= 4 else "0000"
+        year = extract_year(log_time)
         t_name = f"log_index_{year}"
 
         cache_key = f"{actual_bind_key}:{t_name}"
         if cache_key not in LOCAL_TABLE_CACHE:
             with cache_lock:
                 if cache_key not in LOCAL_TABLE_CACHE:
-                    with db_engine.begin() as conn:
-                        conn.execute(text(f"CREATE TABLE IF NOT EXISTS `{t_name}` LIKE `log_index_template`"))
-                    LOCAL_TABLE_CACHE.add(cache_key)
+                    try:
+                        validate_table_name(t_name)
+                        with db_engine.begin() as conn:
+                            conn.execute(text(f"CREATE TABLE IF NOT EXISTS `{t_name}` LIKE `log_index_template`"))
+                        LOCAL_TABLE_CACHE.add(cache_key)
+                        logger.info(f"[{actual_bind_key}] Created new table: {t_name}")
+                    except Exception as e:
+                        logger.error(f"[{actual_bind_key}] Failed to create table {t_name}: {e}")
+                        continue
+
         item['last_scan_id'] = scan_id
         table_groups.setdefault(t_name, []).append(item)
 
         tree_key = (item.get('server_name'), item.get('share_name'), item.get('pn'))
         if all(tree_key):
-            tree_updates[tree_key] = max(tree_updates.get(tree_key, 0), int(year))
+            try:
+                tree_updates[tree_key] = max(tree_updates.get(tree_key, 0), int(year))
+            except ValueError:
+                logger.warning(f"[{actual_bind_key}] Invalid year in tree_updates: {year}")
 
     for attempt in range(3):
         try:
             with db_engine.begin() as conn:
                 for t_name, group in table_groups.items():
+                    try:
+                        validate_table_name(t_name)
+                    except ValueError as e:
+                        logger.error(f"[{actual_bind_key}] Invalid table name in insert: {e}")
+                        continue
+
                     sql = text(f"""
                         INSERT INTO `{t_name}`
                         (server_name, file_name, log_time, pn, sn, status, stage, relative_path, share_name, last_scan_id)
@@ -143,14 +242,14 @@ def process_batch_insert(data):
                         ON DUPLICATE KEY UPDATE last_active_year = GREATEST(last_active_year, VALUES(last_active_year))
                     """), path_params)
 
-            print(f"[{time.strftime('%H:%M:%S')}] [{actual_bind_key}] Successfully inserted {len(items_list)} items.")
+            logger.info(f"[{time.strftime('%H:%M:%S')}] [{actual_bind_key}] Successfully inserted {len(items_list)} items.")
             return
         except Exception as e:
             if ("1213" in str(e) or "1205" in str(e)) and attempt < 2:
-                print(f"[*] [{actual_bind_key}] Deadlock detected, retrying...")
+                logger.warning(f"[*] [{actual_bind_key}] Deadlock detected, retrying (attempt {attempt + 1}/3)...")
                 time.sleep(0.5 * (attempt + 1))
                 continue
-            print(f"DB Error on [{actual_bind_key}]: {e}")
+            logger.error(f"DB Error on [{actual_bind_key}]: {e}", exc_info=True)
             raise e
 
 def start_worker():
@@ -165,38 +264,69 @@ def start_worker():
                     for r_item in rows:
                         LOCAL_TABLE_CACHE.add(f"{bind_key}:{r_item[0]}")
             except Exception as e:
-                print(f"Warning: Cannot cache tables for bind [{bind_key}]: {e}")
+                logger.warning(f"Warning: Cannot cache tables for bind [{bind_key}]: {e}")
 
-        print(f"[*] Redis Worker Started.")
-        print(f"[*] Listening Queues: {LISTEN_QUEUES}")
-        print(f"[*] Cached tables count: {len(LOCAL_TABLE_CACHE)}")
+        redis_client = get_redis_client()
+        logger.info(f"[*] Redis Worker Started.")
+        logger.info(f"[*] Listening Queues: {LISTEN_QUEUES}")
+        logger.info(f"[*] Cached tables count: {len(LOCAL_TABLE_CACHE)}")
 
         while True:
             try:
                 res = redis_client.brpop(LISTEN_QUEUES, timeout=5)
-                if not res: continue
+                if not res:
+                    continue
 
                 active_queue = res[0].decode('utf-8')
-                raw_data = json.loads(res[1])
+                try:
+                    raw_data = json.loads(res[1])
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse task JSON from queue {active_queue}: {e}")
+                    continue
                 project_key = raw_data.get('project_key', 'log_system').strip().lower()
-
                 pause_key = f"{project_key}_pause"
-                if redis_client.get(pause_key) == b"1":
-                    redis_client.lpush(active_queue, res[1])
+                retry_count = 0
+                max_retries = 30
+                while redis_client.get(pause_key) == b"1" and retry_count < max_retries:
+                    logger.debug(f"System paused for {project_key}, waiting... ({retry_count}/{max_retries})")
                     time.sleep(1)
+                    retry_count += 1
+
+                if retry_count >= max_retries:
+                    logger.error(f"Pause timeout for {project_key}, returning task to queue")
+                    redis_client.lpush(active_queue, res[1])
                     continue
 
                 if raw_data.get('type') == 'cleanup_task':
                     redis_client.setex(pause_key, 3600, "1")
                     try:
                         handle_cleanup_task(raw_data)
+                    except Exception as e:
+                        logger.error(f"Cleanup task failed: {e}", exc_info=True)
                     finally:
                         redis_client.delete(pause_key)
                 else:
-                    process_batch_insert(raw_data)
+                    try:
+                        process_batch_insert(raw_data)
+                    except Exception as e:
+                        logger.error(f"Batch insert failed: {e}", exc_info=True)
+                        retries = raw_data.get('retries', 0) + 1
+                        if retries <= 3:
+                            raw_data['retries'] = retries
+                            redis_client.lpush(active_queue, json.dumps(raw_data))
+                            logger.warning(f"Task retried {retries}/3 and returned to queue.")
+                        else:
+                            redis_client.lpush(f"{active_queue}:dead_letter", json.dumps(raw_data))
+                            logger.critical(f"Task exceeded max retries! Moved to dead letter queue. Data: {raw_data}")
             except Exception as e:
-                print(f"--- [Worker Global Error]: {str(e)}")      
+                logger.error(f"--- [Worker Global Error]: {str(e)}", exc_info=True)
                 time.sleep(1)
 
 if __name__ == '__main__':
-    start_worker()
+    try:
+        start_worker()
+    except KeyboardInterrupt:
+        logger.info("Worker interrupted by user")
+    except Exception as e:
+        logger.critical(f"Fatal error in worker: {e}", exc_info=True)
+        raise
