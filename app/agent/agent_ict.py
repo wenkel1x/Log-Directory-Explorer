@@ -30,7 +30,8 @@ class IctLogAgent:
         # ========================================================
         self.re_fixture = re.compile(r'^(AA|AB)[A-Z0-9]+$', re.IGNORECASE)
         self.re_pn_standard = re.compile(r'^[123][A-Z0-9]{10}$')
-        self.re_history_parse = re.compile(r'^([A-Z0-9\-]+)_(PASS|FAIL)_(ICT|OST)_(\d{8,14grid})(?:\.[a-z0-9]+)?$', re.IGNORECASE)
+        #self.re_history_parse = re.compile(r'^([A-Z0-9\-]+)_(PASS|FAIL)_(ICT|OST)_(\d{8,14grid})(?:\.[a-z0-9]+)?$', re.IGNORECASE)
+        self.re_history_parse = re.compile(r'^([A-Z0-9\-]+)_(PASS|FAIL)_(ICT|OST)_(\d{8,14})(?:\.[a-z0-9]+)?$', re.IGNORECASE)
         self.re_history_dcl_parse = re.compile(r'^([A-Z0-9\-]+)-(\d{8,14})-(PASS|FAIL)(?:\.[a-z0-9]+)?$', re.IGNORECASE)
         self.re_result_parse = re.compile(r'^([A-Z0-9\-]+)_(\d{8,14})(?:\.[a-z0-9]+)?$', re.IGNORECASE)
         self.batch_size = 1000
@@ -121,9 +122,9 @@ class IctLogAgent:
             with os.scandir(current_path) as it:
                 for entry in it:
                     if not self.running: break
+                    if entry.name.lower().endswith('.lnk') or entry.name.startswith('.'):
+                        continue
                     if entry.is_dir(follow_symlinks=False):
-                        if entry.name.startswith('.'):
-                            continue
                         dirname_lower = entry.name.lower()
                         if dirname_lower in ['testresult', 'test_history']:
                             anchor_type = "result" if dirname_lower == 'testresult' else "history"
@@ -213,7 +214,7 @@ class IctLogAgent:
         current_scan_id = int(time.time())
         last_ts = 0
         scanned_count = 0
-        if self.mode == 'incr' and self.state_file.exists():
+        if self.state_file.exists():
             try: last_ts = json.loads(self.state_file.read_text(encoding='utf-8')).get("last_ts", 0)
             except: last_ts = 0
         batch = []
@@ -247,33 +248,37 @@ class IctLogAgent:
             wait(futures)
             for f in futures:
                 try:
-                    if f.result() is not True: upload_all_success = False
-                except: upload_all_success = False
+                    if f.result() is not True:
+                        upload_all_success = False
+                except Exception:
+                    upload_all_success = False
         if upload_all_success and self.running:
             try:
-                if self.mode == 'incr' and not self.dry_run:
+                if not self.dry_run:
                     with open(self.state_file, 'w', encoding='utf-8') as f:
                         json.dump({"last_ts": start_ts - 60}, f)
                 print(f"[{datetime.now()}] Scan completed successfully. Total processed logs: {scanned_count}")
                 if self.dry_run:
                     print(f"[{datetime.now()}] Dry-Run finished: All records simulated locally. No data transmitted to server.")
                     return
-                try:
-                    cleanup_payload = {
-                        "project_key": self.project_key,
-                        "server_name": self.server_name,
-                        "scan_id": current_scan_id
-                    }
-                    cleanup_req = urllib.request.Request(
-                        self.cleanup_url,
-                        data=json.dumps(cleanup_payload).encode('utf-8'),
-                        headers={'Content-Type': 'application/json'}
-                    )
-                    with urllib.request.urlopen(cleanup_req, timeout=30) as response:
-                        if 200 <= response.getcode() < 300:
-                            print(f"[{datetime.now()}] Async server data cleanup command sent successfully.")
-                except Exception as ce:
-                    print(f"[{datetime.now()}] Failed to trigger async server cleanup: {ce}")
+                if self.mode == "full":
+                    try:
+                        cleanup_payload = {
+                            "project_key": self.project_key,
+                            "server_name": self.server_name,
+                            "share_name": self.root_name,
+                            "scan_id": current_scan_id
+                        }
+                        cleanup_req = urllib.request.Request(
+                            self.cleanup_url,
+                            data=json.dumps(cleanup_payload).encode('utf-8'),
+                            headers={'Content-Type': 'application/json'}
+                        )
+                        with urllib.request.urlopen(cleanup_req, timeout=30) as response:
+                            if 200 <= response.getcode() < 300:
+                                print(f"[{datetime.now()}] Async server data cleanup command sent successfully.")
+                    except Exception as ce:
+                        print(f"[{datetime.now()}] Failed to trigger async server cleanup: {ce}")
             except: pass
         else:
             print(f"[{datetime.now()}] Scan aborted prematurely or encountered transmission errors.")

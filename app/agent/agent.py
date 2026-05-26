@@ -256,7 +256,7 @@ class LogAgent:
         # 1. 初始化计数器
         scanned_count = 0
         success_count = 0
-        if self.mode == 'incr' and self.state_file.exists():
+        if self.state_file.exists():
             try:
                 state_content = self.state_file.read_text(encoding='utf-8')
                 last_ts = json.loads(state_content).get("last_ts", 0)
